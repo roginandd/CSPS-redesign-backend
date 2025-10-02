@@ -1,7 +1,6 @@
 package org.csps.backend.controller;
 
 import java.util.List;
-import java.util.Map;
 
 import org.csps.backend.domain.dtos.request.MerchRequestDTO;
 import org.csps.backend.domain.dtos.request.MerchUpdateRequestDTO;
@@ -42,6 +41,8 @@ public class MerchController {
         List<MerchResponseDTO> merchList = merchService.getAllMerch();
         return ResponseEntity.ok(merchList);
     }
+
+    
 
     @GetMapping("/{id}")
     @PreAuthorize("hasRole('ADMIN') or hasRole('STUDENT')")
