@@ -34,7 +34,7 @@ public class Admin {
     @OneToOne(cascade=CascadeType.REMOVE)
     @JoinColumn(name = "user_account_id", unique = true)
     private UserAccount userAccount;
-
+    
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private AdminPosition position;
