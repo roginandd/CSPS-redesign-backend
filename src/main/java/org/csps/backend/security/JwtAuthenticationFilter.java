@@ -75,9 +75,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                     domainId = userPrincipal.getAdminId();
                 } else {
                     throw new RuntimeException("Role not recognized: " + userPrincipal.getRole());
-                }
-                System.out.println("DOMAIN ID: " + domainId);
-                
+                }                
                 // Build authentication object
                 UsernamePasswordAuthenticationToken authToken =
                 new UsernamePasswordAuthenticationToken(

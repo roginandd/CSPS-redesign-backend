@@ -91,8 +91,7 @@ public class JwtService {
             customClaim.put("position", admin.getPosition().name());
         }
 
-        System.out.println("Role: " + account.getRole());
-        System.out.println("Position: " + customClaim.get("position"));
+    
         // Generate and sign token
         return Jwts.builder()
                 .claims(customClaim)

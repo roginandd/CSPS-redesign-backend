@@ -26,8 +26,7 @@ public class CustomUserDetailsService implements UserDetailsService {
     public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
         // Fetch base user account
         UserAccount user = userAccountRepository.findByUsername(username);
-        System.out.println("User role: " + user.getRole());
-        
+            
         String domainId = null;
         String role = user.getRole().name();
         String position = null;
