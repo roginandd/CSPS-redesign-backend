@@ -14,7 +14,7 @@ public class CorsConfig {
             @Override
             public void addCorsMappings(CorsRegistry registry) {
                 registry.addMapping("/**") // Apply to all paths
-                        .allowedOrigins("http://localhost:5173") // Your Vite port
+                        .allowedOrigins("https://csps-redesign.vercel.app", "http://localhost:5173") //Your Vite port
                         .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH")
                         .allowedHeaders("*")
                         .allowCredentials(true);

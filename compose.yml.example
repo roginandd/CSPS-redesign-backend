@@ -1,0 +1,38 @@
+# SAMPLE COMPOSE FILE FOR CURRENT PROJECT
+services:
+  csps_backend:
+    build: .
+    container_name: csps_backend
+    ports:
+        - "8080:8080"
+    environment:
+      - DB_URL=jdbc:mysql://db:3306/database_name
+      - DB_USERNAME=DB_USER
+      - DB_PASSWORD=password
+      - JWT_SECRET=your-jwt-secret
+      - AWS_ACCESS_KEY_ID=your-aws-access-key-id
+      - AWS_SECRET_ACCESS_KEY=your-aws-secret-access-key
+      - AWS_REGION=aws-region-1 # put your AWS region here
+      - AWS_S3_BUCKET=example-bucket-name
+      - CLOUDFRONT_DOMAIN=EXAMPLECLOUDFRONTDOMAIN.cloudfront.net
+      - CLOUDFRONT_KEY_PAIR_ID=CLOUDFRONTKEYPAIRID
+      - CLOUDFRONT_PRIVATE_KEY_PATH=PATH/TO/CLOUDFRONT/PRIVATE/KEY.pem
+      - USERNAME_FORMAT=YOUR_USERNAME_PREFIX-
+      - PASSWORD_FORMAT=YOUR_PASSWORD_PREFIX@
+      - ADMIN_USERNAME_FORMAT=YOUR_ADMIN_USERNAME_PREFIX-
+      - ADMIN_PASSWORD_FORMAT=YOUR_ADMIN_PASSWORD_PREFIX@
+    tty: true
+    stdin_open: true
+    depends_on: # Remove this section if not using the local database service
+      - db
+# NOTE: Include this if you want to run a local database with Docker
+  db:
+    image: mysql:8.4
+    container_name: csps_db
+    environment:
+      - MYSQL_ROOT_PASSWORD=password
+      - MYSQL_DATABASE=database_name
+    ports:
+      - "3306:3306"
+    volumes:
+      - ~/docker/csps_db:/var/lib/mysql # Change this if you want to store the DB data elsewhere

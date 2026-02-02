@@ -72,8 +72,9 @@ public class AuthController {
         ResponseCookie refreshTokenCookie = ResponseCookie.from("refreshToken", refreshToken)
                 .httpOnly(true)
                 .path("/")
-                .sameSite("Strict")
+                .sameSite("None")
                 .maxAge(30 * 24 * 60 * 60) // 30 days
+                .secure(true)
                 .build();
 
         response.addHeader(HttpHeaders.SET_COOKIE, accessTokenCookie.toString());
@@ -104,15 +105,17 @@ public class AuthController {
         ResponseCookie accessTokenCookie = ResponseCookie.from("accessToken", "")
                 .httpOnly(true)
                 .path("/")
-                .sameSite("Strict")
+                .sameSite("None")
                 .maxAge(0) // Expire immediately
+                .secure(true)
                 .build();
 
         ResponseCookie refreshTokenCookie = ResponseCookie.from("refreshToken", "")
                 .httpOnly(true)
                 .path("/")
-                .sameSite("Strict")
+                .sameSite("None")
                 .maxAge(0) // Expire immediately
+                .secure(true)
                 .build();
 
         response.addHeader(HttpHeaders.SET_COOKIE, accessTokenCookie.toString());
