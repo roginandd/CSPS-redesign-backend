@@ -19,7 +19,6 @@ import org.csps.backend.repository.OrderItemRepository;
 import org.csps.backend.service.MerchVariantItemService;
 import org.csps.backend.service.MerchVariantService;
 import org.csps.backend.service.S3Service;
-import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -67,7 +66,7 @@ public class MerchVariantServiceImpl implements MerchVariantService {
                     throw new MerchVariantAlreadyExisted("Variant with color " + dto.getColor() + " already exists");
                 }
             }
-            case PIN, STICKER, KEYCHAIN, MEMBERSHIP -> {
+            case PIN, STICKER, KEYCHAIN, MEMBERSHIP, TICKET -> {
                 // For non-clothing, design is required and must be unique
                 if (dto.getDesign() == null || dto.getDesign().trim().isEmpty()) {
                     throw new InvalidRequestException("design is required for this merch type");
