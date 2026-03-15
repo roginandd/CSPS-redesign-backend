@@ -6,9 +6,10 @@ import java.util.Optional;
 import org.csps.backend.domain.dtos.request.BulkStudentMembershipRequestDTO;
 import org.csps.backend.domain.dtos.request.StudentMembershipRequestDTO;
 import org.csps.backend.domain.dtos.request.StudentMembershipSearchDTO;
-import org.csps.backend.domain.dtos.response.StudentMembershipResponseDTO;
-import org.csps.backend.domain.dtos.response.StudentResponseDTO;
 import org.csps.backend.domain.dtos.response.MembershipRatioDTO;
+import org.csps.backend.domain.dtos.response.StudentMembershipResponseDTO;
+import org.csps.backend.domain.dtos.response.StudentNonMemberResponseDTO;
+import org.csps.backend.domain.dtos.response.StudentResponseDTO;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
@@ -49,9 +50,9 @@ public interface StudentMembershipService {
      * Uses a NOT IN subquery to exclude students with active memberships.
      *
      * @param pageable pagination details
-     * @return paginated list of student response DTOs for non-members
+     * @return paginated list of inactive non-member DTOs
      */
-    Page<StudentResponseDTO> getInactiveMembersPaginated(Pageable pageable);
+    Page<StudentNonMemberResponseDTO> getInactiveMembersPaginated(Pageable pageable);
 
     /**
      * Get count of currently active members.
@@ -75,9 +76,10 @@ public interface StudentMembershipService {
      *
      * @param searchDTO the search/filter criteria
      * @param pageable  pagination details
-     * @return paginated list of matching membership response DTOs
+     * @return paginated list of StudentMembershipResponseDTO for active/all membership rows
+     *         or StudentNonMemberResponseDTO when activeStatus = INACTIVE
      */
-    Page<StudentMembershipResponseDTO> searchMemberships(StudentMembershipSearchDTO searchDTO, Pageable pageable);
+    Page<?> searchMemberships(StudentMembershipSearchDTO searchDTO, Pageable pageable);
 
     /**
      * Get ALL active members (unpaginated) for CSV export.

@@ -21,15 +21,45 @@ import jakarta.persistence.criteria.Predicate;
  * Follows the same pattern as OrderSpecification.
  * Builds dynamic predicates based on non-null fields in StudentMembershipSearchDTO.
  *
- * Join path: StudentMembership → Student → UserAccount → UserProfile
+ * Joins are created conditionally:
+ * - studentName filter: joins StudentMembership → Student → UserAccount → UserProfile
+ * - studentId filter: joins StudentMembership → Student
+ * - Other filters (status, year) operate on root StudentMembership entity without joins
  */
 @Component
 public class StudentMembershipSpecification {
 
+    private static boolean hasText(String value) {
+        return Objects.nonNull(value) && !value.trim().isEmpty();
+    }
+
+    private static Predicate buildNamePredicate(
+            jakarta.persistence.criteria.CriteriaBuilder cb,
+            Join<UserAccount, UserProfile> userProfileJoin,
+            String searchValue) {
+        String normalizedSearch = "%" + searchValue.toLowerCase().trim() + "%";
+
+        return cb.or(
+                cb.like(cb.lower(userProfileJoin.get("firstName")), normalizedSearch),
+                cb.like(cb.lower(userProfileJoin.get("lastName")), normalizedSearch),
+                cb.like(
+                        cb.lower(
+                                cb.concat(
+                                        cb.concat(userProfileJoin.get("firstName"), " "),
+                                        userProfileJoin.get("lastName"))),
+                        normalizedSearch),
+                cb.like(
+                        cb.lower(
+                                cb.concat(
+                                        cb.concat(userProfileJoin.get("lastName"), " "),
+                                        userProfileJoin.get("firstName"))),
+                        normalizedSearch));
+    }
+
     /**
      * Build a dynamic Specification for membership filtering.
      * Applies predicates based on non-null search criteria.
-     * Supports filtering by student name, student ID,
+     * Supports filtering by generic search, student name, student ID,
      * active status, academic year start, and academic year end.
      *
      * @param searchDTO the search criteria DTO
@@ -40,38 +70,59 @@ public class StudentMembershipSpecification {
             List<Predicate> predicates = new ArrayList<>();
 
             if (Objects.nonNull(searchDTO)) {
-                // Join: StudentMembership → Student
-                Join<StudentMembership, Student> studentJoin = root.join("student", JoinType.LEFT);
+                // Conditionally join only when needed to filter by student properties
+                Join<StudentMembership, Student> studentJoin = null;
+                Join<Student, UserAccount> userAccountJoin = null;
+                Join<UserAccount, UserProfile> userProfileJoin = null;
 
-                // Join: Student → UserAccount
-                Join<Student, UserAccount> userAccountJoin = studentJoin.join("userAccount", JoinType.LEFT);
+                if (hasText(searchDTO.getSearch()) || hasText(searchDTO.getStudentName()) || hasText(searchDTO.getStudentId())) {
+                    if (studentJoin == null) {
+                        studentJoin = root.join("student", JoinType.LEFT);
+                    }
+                }
 
-                // Join: UserAccount → UserProfile
-                Join<UserAccount, UserProfile> userProfileJoin = userAccountJoin.join("userProfile", JoinType.LEFT);
+                if (hasText(searchDTO.getSearch()) || hasText(searchDTO.getStudentName())) {
+                    if (userAccountJoin == null) {
+                        userAccountJoin = studentJoin.join("userAccount", JoinType.LEFT);
+                    }
+                    if (userProfileJoin == null) {
+                        userProfileJoin = userAccountJoin.join("userProfile", JoinType.LEFT);
+                    }
+                }
 
-                // Filter by student name (first name or last name, case-insensitive partial match)
-                if (Objects.nonNull(searchDTO.getStudentName()) && !searchDTO.getStudentName().isEmpty()) {
-                    String nameLike = "%" + searchDTO.getStudentName().toLowerCase().trim() + "%";
+                // Filter by a generic search term (student ID or name)
+                if (hasText(searchDTO.getSearch())) {
+                    String searchLike = "%" + searchDTO.getSearch().toLowerCase().trim() + "%";
                     predicates.add(
                         cb.or(
-                            cb.like(cb.lower(userProfileJoin.get("firstName")), nameLike),
-                            cb.like(cb.lower(userProfileJoin.get("lastName")), nameLike)
+                            cb.like(cb.lower(studentJoin.get("studentId").as(String.class)), searchLike),
+                            buildNamePredicate(cb, userProfileJoin, searchDTO.getSearch())
                         )
                     );
                 }
 
+                // Filter by student name (first name, last name, or full name, case-insensitive partial match)
+                if (hasText(searchDTO.getStudentName())) {
+                    predicates.add(buildNamePredicate(cb, userProfileJoin, searchDTO.getStudentName()));
+                }
+
                 // Filter by exact student ID
-                if (Objects.nonNull(searchDTO.getStudentId()) && !searchDTO.getStudentId().trim().isEmpty()) {
-                    predicates.add(cb.like(studentJoin.get("studentId"), searchDTO.getStudentId().trim()));
+                if (hasText(searchDTO.getStudentId())) {
+                    predicates.add(cb.like(cb.lower(studentJoin.get("studentId").as(String.class)),
+                            "%" + searchDTO.getStudentId().toLowerCase().trim() + "%"));
                 }
 
                 // Filter by active status ("ACTIVE" or "INACTIVE")
-                if (Objects.nonNull(searchDTO.getActiveStatus()) && !searchDTO.getActiveStatus().isEmpty()) {
-                    boolean isActive = "ACTIVE".equalsIgnoreCase(searchDTO.getActiveStatus());
-                    predicates.add(cb.equal(root.get("active"), isActive));
-                } 
+                if (hasText(searchDTO.getActiveStatus())) {
+                    String status = searchDTO.getActiveStatus().trim().toUpperCase();
+                    if ("ACTIVE".equals(status)) {
+                        predicates.add(cb.equal(root.get("active"), true));
+                    } else if ("INACTIVE".equals(status)) {
+                        predicates.add(cb.equal(root.get("active"), false));
+                    }
+                    // Invalid status values are silently ignored
+                }
 
-                
                 // Filter by academic year start
                 if (Objects.nonNull(searchDTO.getYearStart())) {
                     predicates.add(cb.equal(root.get("yearStart"), searchDTO.getYearStart()));

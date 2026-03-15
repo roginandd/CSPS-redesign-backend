@@ -8,6 +8,7 @@ import org.csps.backend.domain.dtos.request.StudentMembershipRequestDTO;
 import org.csps.backend.domain.dtos.request.StudentMembershipSearchDTO;
 import org.csps.backend.domain.dtos.response.MembershipRatioDTO;
 import org.csps.backend.domain.dtos.response.StudentMembershipResponseDTO;
+import org.csps.backend.domain.dtos.response.StudentNonMemberResponseDTO;
 import org.csps.backend.domain.dtos.response.StudentResponseDTO;
 import org.csps.backend.service.StudentMembershipService;
 import org.springframework.data.domain.Page;
@@ -107,15 +108,15 @@ public class StudentMembershipController {
      *
      * @param page zero-based page index (default 0)
      * @param size number of items per page (default 7)
-     * @return paginated list of student response DTOs for non-members
+     * @return paginated list of inactive non-member DTOs
      */
     @GetMapping("/inactive/paginated")
     @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<Page<StudentResponseDTO>> getInactiveMembersPaginated(
+    public ResponseEntity<Page<StudentNonMemberResponseDTO>> getInactiveMembersPaginated(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "7") int size) {
         Pageable pageable = PageRequest.of(page, size);
-        Page<StudentResponseDTO> inactiveMembers = studentMembershipService.getInactiveMembersPaginated(pageable);
+        Page<StudentNonMemberResponseDTO> inactiveMembers = studentMembershipService.getInactiveMembersPaginated(pageable);
         return ResponseEntity.ok(inactiveMembers);
     }
 
@@ -146,21 +147,23 @@ public class StudentMembershipController {
     }
 
     /**
-     * Search memberships with dynamic filters using JPA Specification.
+     * Search memberships or non-members depending on activeStatus.
      * All query parameters are optional — omitted params are ignored in the filter.
      *
-     * @param studentName  partial match on first or last name (case-insensitive)
-     * @param studentId    exact match on student ID
-     * @param activeStatus "ACTIVE", "INACTIVE", or omit for all
+     * @param search       generic partial match on student ID or name
+     * @param studentName  partial match on first name, last name, or full name
+     * @param studentId    partial match on student ID
+     * @param activeStatus "ACTIVE" or omitted for membership rows, "INACTIVE" for non-members
      * @param yearStart    filter by membership academic year start
      * @param yearEnd      filter by membership academic year end
      * @param page         zero-based page index (default 0)
      * @param size         items per page (default 7)
-     * @return paginated list of matching StudentMembershipResponseDTOs
+     * @return paginated list of StudentMembershipResponseDTO or StudentNonMemberResponseDTO
      */
     @GetMapping("/search")
     @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<Page<StudentMembershipResponseDTO>> searchMemberships(
+    public ResponseEntity<Page<?>> searchMemberships(
+            @RequestParam(required = false) String search,
             @RequestParam(required = false) String studentName,
             @RequestParam(required = false) String studentId,
             @RequestParam(required = false) String activeStatus,
@@ -170,6 +173,7 @@ public class StudentMembershipController {
             @RequestParam(defaultValue = "7") int size) {
 
         StudentMembershipSearchDTO searchDTO = StudentMembershipSearchDTO.builder()
+                .search(search)
                 .studentName(studentName)
                 .studentId(studentId)
                 .activeStatus(activeStatus)
@@ -178,7 +182,7 @@ public class StudentMembershipController {
                 .build();
 
         Pageable pageable = PageRequest.of(page, size);
-        Page<StudentMembershipResponseDTO> results = studentMembershipService.searchMemberships(searchDTO, pageable);
+        Page<?> results = studentMembershipService.searchMemberships(searchDTO, pageable);
         return ResponseEntity.ok(results);
     }
 

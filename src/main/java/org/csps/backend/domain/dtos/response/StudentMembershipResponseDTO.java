@@ -15,6 +15,7 @@ import java.time.LocalDateTime;
 public class StudentMembershipResponseDTO {
     private Long membershipId;
     private String studentId;
+    private String fullName;
 
     private LocalDateTime dateJoined;
 

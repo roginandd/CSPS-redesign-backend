@@ -4,12 +4,14 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import org.csps.backend.domain.dtos.request.BulkStudentMembershipRequestDTO;
 import org.csps.backend.domain.dtos.request.StudentMembershipRequestDTO;
 import org.csps.backend.domain.dtos.request.StudentMembershipSearchDTO;
 import org.csps.backend.domain.dtos.response.MembershipRatioDTO;
 import org.csps.backend.domain.dtos.response.StudentMembershipResponseDTO;
+import org.csps.backend.domain.dtos.response.StudentNonMemberResponseDTO;
 import org.csps.backend.domain.dtos.response.StudentResponseDTO;
 import org.csps.backend.domain.entities.Student;
 import org.csps.backend.domain.entities.StudentMembership;
@@ -45,7 +47,7 @@ public class StudentMembershipServiceImpl implements StudentMembershipService {
     private final StudentRepository studentRepository;
     private final StudentMapper studentMapper;
 
-    @Value("${csps.currentAcademicYear.start}")
+    @Value("${csps.currentAcademicYear.start}")   
     private int currentYearStart;
 
     @Value("${csps.currentAcademicYear.end}")
@@ -239,12 +241,12 @@ public class StudentMembershipServiceImpl implements StudentMembershipService {
      * Delegates to StudentRepository's NOT IN subquery with EntityGraph.
      *
      * @param pageable the pagination details
-     * @return paginated list of student response DTOs for non-members
+     * @return paginated list of inactive non-member DTOs
      */
     @Override
-    public Page<StudentResponseDTO> getInactiveMembersPaginated(Pageable pageable) {
+    public Page<StudentNonMemberResponseDTO> getInactiveMembersPaginated(Pageable pageable) {
         Page<Student> nonMembers = studentRepository.findStudentsWithoutActiveMembership(pageable);
-        return nonMembers.map(studentMapper::toResponseDTO);
+        return nonMembers.map(this::toNonMemberResponseDTO);
     }
 
     /**
@@ -288,7 +290,16 @@ public class StudentMembershipServiceImpl implements StudentMembershipService {
      * @return paginated list of matching membership response DTOs
      */
     @Override
-    public Page<StudentMembershipResponseDTO> searchMemberships(StudentMembershipSearchDTO searchDTO, Pageable pageable) {
+    public Page<?> searchMemberships(StudentMembershipSearchDTO searchDTO, Pageable pageable) {
+        if (isInactiveSearch(searchDTO)) {
+            Page<Student> nonMembers = studentRepository.searchStudentsWithoutActiveMembership(
+                    normalizeSearchValue(searchDTO.getSearch()),
+                    normalizeSearchValue(searchDTO.getStudentName()),
+                    normalizeSearchValue(searchDTO.getStudentId()),
+                    pageable);
+            return nonMembers.map(this::toNonMemberResponseDTO);
+        }
+
         Specification<StudentMembership> spec = StudentMembershipSpecification.withFilters(searchDTO);
         Page<StudentMembership> memberships = studentMembershipRepository.findAll(spec, pageable);
         return memberships.map(studentMembershipMapper::toResponseDTO);
@@ -389,5 +400,43 @@ public class StudentMembershipServiceImpl implements StudentMembershipService {
         return savedMemberships.stream()
                 .map(studentMembershipMapper::toResponseDTO)
                 .toList();
+    }
+
+    private boolean isInactiveSearch(StudentMembershipSearchDTO searchDTO) {
+        return searchDTO != null
+                && searchDTO.getActiveStatus() != null
+                && "INACTIVE".equalsIgnoreCase(searchDTO.getActiveStatus().trim());
+    }
+
+    private String normalizeSearchValue(String value) {
+        if (value == null) {
+            return null;
+        }
+
+        String trimmedValue = value.trim();
+        return trimmedValue.isEmpty() ? null : trimmedValue;
+    }
+
+    private StudentNonMemberResponseDTO toNonMemberResponseDTO(Student student) {
+        return StudentNonMemberResponseDTO.builder()
+                .studentId(student.getStudentId())
+                .fullName(buildFullName(student))
+                .build();
+    }
+
+    private String buildFullName(Student student) {
+        if (student == null || student.getUserAccount() == null || student.getUserAccount().getUserProfile() == null) {
+            return null;
+        }
+
+        List<String> nameParts = Stream.of(
+                student.getUserAccount().getUserProfile().getFirstName(),
+                student.getUserAccount().getUserProfile().getMiddleName(),
+                student.getUserAccount().getUserProfile().getLastName())
+                .filter(part -> part != null && !part.isBlank())
+                .map(String::trim)
+                .toList();
+
+        return nameParts.isEmpty() ? null : String.join(" ", nameParts);
     }
 }

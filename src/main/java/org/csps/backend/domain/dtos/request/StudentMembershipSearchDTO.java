@@ -9,9 +9,10 @@ import lombok.NoArgsConstructor;
  * Search filter DTO for querying student memberships with JPA Specification.
  * All fields are optional — null fields are ignored in the predicate build.
  *
- * @field studentName  partial match on first or last name (case-insensitive)
- * @field studentId    exact match on 8-character student ID
- * @field activeStatus "ACTIVE", "INACTIVE", or null for all
+ * @field search       generic partial match on student ID or name
+ * @field studentName  partial match on first name, last name, or full name
+ * @field studentId    partial match on student ID
+ * @field activeStatus "ACTIVE" for membership rows, "INACTIVE" for non-members, or null for all memberships
  * @field yearStart    filter by membership academic year start
  * @field yearEnd      filter by membership academic year end
  */
@@ -20,6 +21,8 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @Builder
 public class StudentMembershipSearchDTO {
+
+    private String search;
 
     private String studentName;
 

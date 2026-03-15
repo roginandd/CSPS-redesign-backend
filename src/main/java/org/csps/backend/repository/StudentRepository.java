@@ -51,6 +51,38 @@ public interface StudentRepository extends JpaRepository<Student, String> {
     Page<Student> findStudentsWithoutActiveMembership(Pageable pageable);
 
     /**
+     * Search students who do NOT have an active membership (non-members).
+     * Supports the same studentId/name filters used by membership search.
+     *
+     * @param search generic partial match on student ID or name
+     * @param studentName partial match on first name, last name, or full name
+     * @param studentId partial match on student ID
+     * @param pageable pagination details
+     * @return paginated list of filtered students without active memberships
+     */
+    @EntityGraph(attributePaths = {"userAccount", "userAccount.userProfile"})
+    @Query("SELECT s FROM Student s JOIN s.userAccount ua JOIN ua.userProfile up " +
+           "WHERE s.studentId NOT IN " +
+           "(SELECT sm.student.studentId FROM StudentMembership sm WHERE sm.active = true) " +
+           "AND (:search IS NULL OR " +
+           "LOWER(s.studentId) LIKE LOWER(CONCAT('%', :search, '%')) OR " +
+           "LOWER(up.firstName) LIKE LOWER(CONCAT('%', :search, '%')) OR " +
+           "LOWER(up.lastName) LIKE LOWER(CONCAT('%', :search, '%')) OR " +
+           "LOWER(CONCAT(up.firstName, CONCAT(' ', up.lastName))) LIKE LOWER(CONCAT('%', :search, '%')) OR " +
+           "LOWER(CONCAT(up.lastName, CONCAT(' ', up.firstName))) LIKE LOWER(CONCAT('%', :search, '%'))) " +
+           "AND (:studentName IS NULL OR " +
+           "LOWER(up.firstName) LIKE LOWER(CONCAT('%', :studentName, '%')) OR " +
+           "LOWER(up.lastName) LIKE LOWER(CONCAT('%', :studentName, '%')) OR " +
+           "LOWER(CONCAT(up.firstName, CONCAT(' ', up.lastName))) LIKE LOWER(CONCAT('%', :studentName, '%')) OR " +
+           "LOWER(CONCAT(up.lastName, CONCAT(' ', up.firstName))) LIKE LOWER(CONCAT('%', :studentName, '%'))) " +
+           "AND (:studentId IS NULL OR LOWER(s.studentId) LIKE LOWER(CONCAT('%', :studentId, '%')))")
+    Page<Student> searchStudentsWithoutActiveMembership(
+            @Param("search") String search,
+            @Param("studentName") String studentName,
+            @Param("studentId") String studentId,
+            Pageable pageable);
+
+    /**
      * Find ALL students without active membership (unpaginated) with eager loading.
      * Used for CSV export of non-member data.
      *
