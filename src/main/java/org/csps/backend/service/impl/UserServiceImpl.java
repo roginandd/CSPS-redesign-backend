@@ -5,15 +5,18 @@ import java.util.List;
 import org.csps.backend.domain.dtos.request.ChangePasswordRequestDTO;
 import org.csps.backend.domain.dtos.request.StudentRequestDTO;
 import org.csps.backend.domain.dtos.request.UserRequestDTO;
+import org.csps.backend.domain.entities.Student;
 import org.csps.backend.domain.dtos.response.UserResponseDTO;
 import org.csps.backend.domain.entities.UserAccount;
 import org.csps.backend.domain.entities.UserProfile;
 import org.csps.backend.domain.enums.UserRole;
 import org.csps.backend.exception.EmailAlreadyExistsException;
 import org.csps.backend.exception.MissingFieldException;
+import org.csps.backend.exception.StudentNotFoundException;
 import org.csps.backend.exception.UserAlreadyExistsException;
 import org.csps.backend.exception.UserNotFoundException;
 import org.csps.backend.mapper.UserMapper;
+import org.csps.backend.repository.StudentRepository;
 import org.csps.backend.repository.UserAccountRepository;
 import org.csps.backend.repository.UserProfileRepository;
 import org.csps.backend.service.UserService;
@@ -29,6 +32,7 @@ public class UserServiceImpl implements UserService {
     private final UserMapper userMapper;
     private final UserAccountRepository userAccountRepository;
     private final UserProfileRepository userProfileRepository;
+    private final StudentRepository studentRepository;
     
     private final PasswordEncoder passwordEncoder;
     
@@ -141,6 +145,25 @@ public class UserServiceImpl implements UserService {
 
         user.setPassword(passwordEncoder.encode(requestDTO.getNewPassword()));
         userAccountRepository.save(user);
+    }
+
+    @Override
+    public void restoreStudentPassword(String studentId) {
+        if (studentId == null || studentId.isBlank()) {
+            throw new MissingFieldException("Student ID cannot be empty!");
+        }
+
+        Student student = studentRepository.findByStudentId(studentId.trim())
+                .orElseThrow(() -> new StudentNotFoundException("Student not found: " + studentId));
+
+        UserAccount userAccount = student.getUserAccount();
+        if (userAccount == null || userAccount.getUserAccountId() == null) {
+            throw new UserNotFoundException("User account not found for student: " + studentId);
+        }
+
+        String defaultPassword = passwordFormat + student.getStudentId();
+        userAccount.setPassword(passwordEncoder.encode(defaultPassword));
+        userAccountRepository.save(userAccount);
     }
 
 }

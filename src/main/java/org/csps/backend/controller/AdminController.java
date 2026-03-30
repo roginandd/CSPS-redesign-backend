@@ -62,6 +62,15 @@ public class AdminController {
         return GlobalResponseBuilder.buildResponse(message, adminResponseDTO, HttpStatus.OK);
     }
 
+    @PostMapping("/{adminId}/reset-password")
+    @PreAuthorize("hasRole('ADMIN_EXECUTIVE')")
+    @Auditable(action = AuditAction.UPDATE, resourceType = "Admin")
+    public ResponseEntity<GlobalResponseBuilder<AdminResponseDTO>> resetAdminPassword(@PathVariable Long adminId) {
+        AdminResponseDTO adminResponseDTO = adminService.resetAdminPassword(adminId);
+        String message = "Admin password reset to default successfully";
+        return GlobalResponseBuilder.buildResponse(message, adminResponseDTO, HttpStatus.OK);
+    }
+
     @PostMapping("/grant-access")
     @Auditable(action = AuditAction.CREATE, resourceType = "Admin")
     public ResponseEntity<GlobalResponseBuilder<AdminResponseDTO>> grantAdminAccess(

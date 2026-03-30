@@ -174,6 +174,25 @@ public class AdminServiceImpl implements AdminService {
     }
 
     @Override
+    public AdminResponseDTO resetAdminPassword(Long adminId) {
+        Admin admin = adminRepository.findById(adminId)
+                .orElseThrow(() -> new AdminNotFoundException("Admin not found with ID: " + adminId));
+
+        UserAccount adminUserAccount = admin.getUserAccount();
+        if (adminUserAccount == null || adminUserAccount.getUserAccountId() == null) {
+            throw new AdminNotFoundException("Admin account not found for admin ID: " + adminId);
+        }
+
+        String position = admin.getPosition().toString();
+
+        String defaultPassword = String.format("%s%s", adminPasswordFormat, position);
+        adminUserAccount.setPassword(passwordEncoder.encode(defaultPassword));
+        userAccountRepository.save(adminUserAccount);
+
+        return adminMapper.toResponseDTO(admin);
+    }
+
+    @Override
     public AdminResponseDTO grantAdminAccess(String studentId, AdminPosition position) {
         // Check if student exists
         Student student = studentRepository.findById(studentId)

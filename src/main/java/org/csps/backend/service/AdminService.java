@@ -15,6 +15,7 @@ public interface AdminService {
     AdminResponseDTO createAdmin(AdminPostRequestDTO adminPostRequestDTO);
     AdminResponseDTO createAdminUnsecure(AdminUnsecureRequestDTO adminUnsecureRequestDTO);
     AdminResponseDTO deleteAdmin(Long adminId);
+    AdminResponseDTO resetAdminPassword(Long adminId);
     
     // New methods
     AdminResponseDTO grantAdminAccess(String studentId, AdminPosition position);

@@ -13,5 +13,6 @@ public interface UserService {
     UserResponseDTO getUserById(Long userId);
     List<UserResponseDTO> getAllUsers();
     void changePassword(Long userId, ChangePasswordRequestDTO requestDTO);
+    void restoreStudentPassword(String studentId);
 
 }

@@ -5,6 +5,7 @@ import org.csps.backend.domain.dtos.request.UserRequestDTO;
 import org.csps.backend.domain.dtos.response.GlobalResponseBuilder;
 import org.csps.backend.domain.dtos.response.StudentResponseDTO;
 import org.csps.backend.service.StudentService;
+import org.csps.backend.service.UserService;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -12,6 +13,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -30,6 +32,7 @@ import lombok.RequiredArgsConstructor;
 public class StudentController {
 
    private final StudentService studentService;
+   private final UserService userService;
 
    @PostMapping()
    @PreAuthorize("hasRole('ADMIN_EXECUTIVE')")
@@ -40,7 +43,7 @@ public class StudentController {
    }
 
    @GetMapping()
-   @PreAuthorize("hasRole('ADMIN')")
+   @PreAuthorize("hasAnyRole('ADMIN_EXECUTIVE')")
    public ResponseEntity<Page<StudentResponseDTO>> getAllStudents(
            @RequestParam(defaultValue = "0") int page,
            @RequestParam(defaultValue = "7") int size,
@@ -59,11 +62,21 @@ public class StudentController {
    }
 
    @GetMapping("/{studentId}")
-   @PreAuthorize("hasRole('ADMIN')")
+   @PreAuthorize("hasAnyRole('ADMIN_EXECUTIVE')")
    public ResponseEntity<StudentResponseDTO> getStudent(@PathVariable String studentId) {
        // should be map first to responseDTO
        StudentResponseDTO student = studentService.getStudentProfile(studentId);
        return ResponseEntity.ok(student);
+   }
+
+   @PatchMapping("/{studentId}/restore-default-password")
+   @PreAuthorize("hasRole('ADMIN_EXECUTIVE')")
+   public ResponseEntity<GlobalResponseBuilder<String>> restoreDefaultPassword(@PathVariable String studentId) {
+       userService.restoreStudentPassword(studentId);
+       return GlobalResponseBuilder.buildResponse(
+               "Default password restored successfully",
+               "Password reset to the default student format",
+               HttpStatus.OK);
    }
 
    @PutMapping("/{studentId}/complete-profile")
