@@ -18,9 +18,7 @@ public class RecoveryTokenResponseDTO {
     private Long recoveryTokenId;
     
     private Long userAccountId;
-    
-    private String token;
-    
+
     private LocalDateTime createdAt;
     
     @JsonAlias("expiresAt")

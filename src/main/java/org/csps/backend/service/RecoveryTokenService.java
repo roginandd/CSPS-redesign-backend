@@ -20,6 +20,11 @@ public interface RecoveryTokenService {
      * mark recovery token as used
      */
     void markTokenAsUsed(String token);
+
+    /**
+     * reset a user's password and consume the recovery token atomically
+     */
+    void resetPassword(String token, String newPassword);
     
     /**
      * get valid recovery token for user
