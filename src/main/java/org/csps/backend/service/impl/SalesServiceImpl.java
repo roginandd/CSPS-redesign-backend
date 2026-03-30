@@ -3,9 +3,12 @@ package org.csps.backend.service.impl;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import org.csps.backend.domain.dtos.request.OrderSearchDTO;
@@ -18,10 +21,14 @@ import org.csps.backend.domain.entities.OrderItem;
 import org.csps.backend.domain.enums.MerchType;
 import org.csps.backend.domain.enums.OrderStatus;
 import org.csps.backend.domain.enums.SalesPeriod;
-import org.csps.backend.repository.MerchVariantItemRepository;
+import org.csps.backend.exception.InvalidRequestException;
+import org.csps.backend.exception.InvalidOrderStatusTransitionException;
 import org.csps.backend.repository.OrderItemRepository;
 import org.csps.backend.repository.OrderRepository;
+import org.csps.backend.repository.StudentMembershipRepository;
 import org.csps.backend.repository.specification.OrderSpecification;
+import org.csps.backend.service.OrderLifecycleService;
+import org.csps.backend.service.OrderNotificationService;
 import org.csps.backend.service.SalesService;
 import org.csps.backend.service.StudentMembershipService;
 import org.springframework.beans.factory.annotation.Value;
@@ -38,9 +45,11 @@ import lombok.RequiredArgsConstructor;
 public class SalesServiceImpl implements SalesService {
 
     private final OrderRepository orderRepository;
-    private final MerchVariantItemRepository merchVariantItemRepository;
     private final OrderItemRepository orderItemRepository;
+    private final OrderLifecycleService orderLifecycleService;
     private final StudentMembershipService studentMembershipService;
+    private final StudentMembershipRepository studentMembershipRepository;
+    private final OrderNotificationService orderNotificationService;
 
     @Value("${csps.currentAcademicYear.start}")
     private int currentYearStart;
@@ -73,13 +82,15 @@ public class SalesServiceImpl implements SalesService {
     @Override
     public Page<TransactionDTO> getTransactions(Pageable pageable, OrderSearchDTO searchDTO) {
         /* build specification for database-level filtering to prevent loading all orders into memory */
-        Specification<Order> spec = OrderSpecification.withFilters(searchDTO);
+        OrderSearchDTO normalizedSearch = normalizeAndValidateSearch(searchDTO);
+        Specification<Order> spec = OrderSpecification.withFilters(normalizedSearch);
         
         /* fetch paginated results with eager loading via @EntityGraph in OrderRepository.findAll(pageable) */
         Page<Order> orders = orderRepository.findAll(spec, pageable);
-        
+        Set<String> activeMembershipStudentIds = resolveActiveMembershipStudentIds(orders.getContent());
+
         /* map orders to DTOs */
-        return orders.map(this::mapToTransactionDTO);
+        return orders.map(order -> mapToTransactionDTO(order, activeMembershipStudentIds.contains(order.getStudent().getStudentId())));
     }
 
 
@@ -90,43 +101,40 @@ public class SalesServiceImpl implements SalesService {
         Order order = orderRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Order not found"));
 
-        // Check for MEMBERSHIP items and create membership if found
-        if (order.getOrderItems() != null) {
-            boolean hasMembership = false;
-            for (OrderItem item : order.getOrderItems()) {
-                if (item.getMerchVariantItem() != null 
-                        && item.getMerchVariantItem().getMerchVariant() != null
-                        && item.getMerchVariantItem().getMerchVariant().getMerch() != null
-                        && item.getMerchVariantItem().getMerchVariant().getMerch().getMerchType() == MerchType.MEMBERSHIP) {
-                    hasMembership = true;
-                    break;
-                }
-            }
-
-            if (hasMembership) {
-                try {
-                    StudentMembershipRequestDTO membershipRequest = StudentMembershipRequestDTO.builder()
-                            .studentId(order.getStudent().getStudentId())
-                            .yearStart(currentYearStart)
-                            .yearEnd(currentYearEnd)
-                            .build();
-                    
-                    studentMembershipService.createStudentMembership(membershipRequest);
-                } catch (Exception e) {
-                    // Log error but proceed with order approval? Or fail?
-                    // For now, let's log and proceed, or maybe rethrow if strict
-                    System.err.println("Failed to create membership for order " + id + ": " + e.getMessage());
-                    // Decide: Should we fail the transaction if membership fails? 
-                    // Probably yes, to ensure consistency.
-                    throw new RuntimeException("Failed to create membership: " + e.getMessage(), e);
-                }
-            }
+        if (order.getOrderStatus() != OrderStatus.PENDING) {
+            throw new InvalidOrderStatusTransitionException("Only pending orders can be approved");
         }
 
-        order.setOrderStatus(OrderStatus.CLAIMED);
-        Order savedOrder = orderRepository.save(order);
+        if (order.getOrderItems() == null || order.getOrderItems().isEmpty()) {
+            throw new InvalidRequestException("Orders without items cannot be approved");
+        }
 
-        return mapToTransactionDTO(savedOrder);
+        if (order.getOrderItems().stream().anyMatch(item -> item.getOrderStatus() != OrderStatus.PENDING)) {
+            throw new InvalidOrderStatusTransitionException("Only orders with pending items can be approved");
+        }
+
+        if (containsMembershipItem(order.getOrderItems())) {
+            StudentMembershipRequestDTO membershipRequest = StudentMembershipRequestDTO.builder()
+                    .studentId(order.getStudent().getStudentId())
+                    .yearStart(currentYearStart)
+                    .yearEnd(currentYearEnd)
+                    .build();
+
+            studentMembershipService.createStudentMembership(membershipRequest);
+        }
+
+        for (OrderItem item : order.getOrderItems()) {
+            item.setOrderStatus(OrderStatus.TO_BE_CLAIMED);
+            item.setUpdatedAt(LocalDateTime.now());
+            orderItemRepository.save(item);
+        }
+
+        order.setOrderStatus(OrderStatus.TO_BE_CLAIMED);
+        order.setUpdatedAt(LocalDateTime.now());
+        Order savedOrder = orderRepository.save(order);
+        sendReadyToClaimNotifications(savedOrder.getOrderId());
+
+        return mapToTransactionDTO(savedOrder, isActiveMember(savedOrder.getStudent().getStudentId()));
     }
 
     @Override
@@ -135,30 +143,14 @@ public class SalesServiceImpl implements SalesService {
         Order order = orderRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Order not found"));
 
-        // Restore inventory for all order items in this order and reject them
-        if (order.getOrderItems() != null && !order.getOrderItems().isEmpty()) {
-            for (OrderItem orderItem : order.getOrderItems()) {
-                // Restore the quantity to the MerchVariantItem
-                var merchVariantItem = orderItem.getMerchVariantItem();
-                if (merchVariantItem != null) {
-                    Integer currentStock = merchVariantItem.getStockQuantity();
-                    int restoredStock = currentStock + orderItem.getQuantity();
-                    merchVariantItem.setStockQuantity(restoredStock);
-                    merchVariantItemRepository.save(merchVariantItem);
-                }
-                
-                // Set order item status to REJECTED
-                orderItem.setOrderStatus(OrderStatus.REJECTED);
-                orderItem.setUpdatedAt(LocalDateTime.now());
-                orderItemRepository.save(orderItem);
-            }
+        if (order.getOrderStatus() == OrderStatus.CANCELLED) {
+            throw new InvalidOrderStatusTransitionException("Cancelled orders cannot be rejected");
         }
 
-        order.setOrderStatus(OrderStatus.REJECTED);
-        orderRepository.save(order);
+        orderLifecycleService.applyTerminalStatus(order, OrderStatus.REJECTED);
     }
 
-    private TransactionDTO mapToTransactionDTO(Order order) {
+    private TransactionDTO mapToTransactionDTO(Order order, boolean activeMember) {
         String studentName = order.getStudent().getUserAccount().getUserProfile().getFirstName() + " " +
                 order.getStudent().getUserAccount().getUserProfile().getLastName();
 
@@ -168,11 +160,47 @@ public class SalesServiceImpl implements SalesService {
                 .studentId(order.getStudent().getStudentId())
                 .studentName(studentName)
                 .idNumber(order.getStudent().getStudentId())
-                .membershipType("Member") // Can be enhanced with actual membership data
+                .membershipType(activeMember ? "Member" : "Non-Member")
                 .amount(BigDecimal.valueOf(order.getTotalPrice()))
                 .date(order.getOrderDate().toLocalDate().toString())
                 .status(order.getOrderStatus().name())
                 .build();
+    }
+
+    private Set<String> resolveActiveMembershipStudentIds(List<Order> orders) {
+        Set<String> studentIds = orders.stream()
+                .map(Order::getStudent)
+                .filter(student -> student != null && student.getStudentId() != null)
+                .map(student -> student.getStudentId().trim())
+                .filter(studentId -> !studentId.isEmpty())
+                .collect(Collectors.toSet());
+
+        if (studentIds.isEmpty()) {
+            return Set.of();
+        }
+
+        return new HashSet<>(studentMembershipRepository.findActiveStudentIdsByStudentIdIn(studentIds));
+    }
+
+    private boolean containsMembershipItem(List<OrderItem> orderItems) {
+        return orderItems.stream().anyMatch(item -> item.getMerchVariantItem() != null
+                && item.getMerchVariantItem().getMerchVariant() != null
+                && item.getMerchVariantItem().getMerchVariant().getMerch() != null
+                && item.getMerchVariantItem().getMerchVariant().getMerch().getMerchType() == MerchType.MEMBERSHIP);
+    }
+
+    private void sendReadyToClaimNotifications(Long orderId) {
+        List<OrderItem> orderItems = orderItemRepository.findByOrderOrderId(orderId);
+        for (OrderItem orderItem : orderItems) {
+            var notificationData = orderNotificationService.extractNotificationData(orderItem, OrderStatus.TO_BE_CLAIMED);
+            if (notificationData != null) {
+                orderNotificationService.sendOrderStatusEmail(notificationData);
+            }
+        }
+    }
+
+    private boolean isActiveMember(String studentId) {
+        return studentMembershipRepository.hasActiveMembership(studentId);
     }
 
     private List<ChartPointDTO> generateChartData(List<Order> orders, SalesPeriod period) {
@@ -219,5 +247,52 @@ public class SalesServiceImpl implements SalesService {
                         .value(entry.getValue())
                         .build())
                 .collect(Collectors.toList());
+    }
+
+    private OrderSearchDTO normalizeAndValidateSearch(OrderSearchDTO searchDTO) {
+        OrderSearchDTO normalizedSearch = searchDTO == null ? new OrderSearchDTO() : searchDTO;
+
+        normalizedSearch.setStudentName(normalizeWhitespace(normalizedSearch.getStudentName()));
+        normalizedSearch.setStudentId(trimToNull(normalizedSearch.getStudentId()));
+        normalizedSearch.setStatus(normalizeStatus(normalizedSearch.getStatus()));
+
+        if (normalizedSearch.getStartDate() != null
+                && normalizedSearch.getEndDate() != null
+                && normalizedSearch.getEndDate().isBefore(normalizedSearch.getStartDate())) {
+            throw new InvalidRequestException("End date must be greater than or equal to start date");
+        }
+
+        if (normalizedSearch.getStatus() != null) {
+            try {
+                OrderStatus.valueOf(normalizedSearch.getStatus());
+            } catch (IllegalArgumentException ex) {
+                throw new InvalidRequestException("Invalid order status: " + normalizedSearch.getStatus());
+            }
+        }
+
+        if (normalizedSearch.getYear() != null
+                && (normalizedSearch.getYear() < 1000 || normalizedSearch.getYear() > 9999)) {
+            throw new InvalidRequestException("Year filter must be a four-digit year");
+        }
+
+        return normalizedSearch;
+    }
+
+    private String normalizeStatus(String status) {
+        String trimmedStatus = trimToNull(status);
+        return trimmedStatus == null ? null : trimmedStatus.toUpperCase(Locale.ROOT);
+    }
+
+    private String normalizeWhitespace(String value) {
+        return value == null ? null : value.trim().replaceAll("\\s+", " ");
+    }
+
+    private String trimToNull(String value) {
+        if (value == null) {
+            return null;
+        }
+
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 }

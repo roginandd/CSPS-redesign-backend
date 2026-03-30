@@ -13,6 +13,7 @@ import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -52,8 +53,9 @@ public class OrderItemController {
     @GetMapping("/{id}")
     @PreAuthorize("hasRole('STUDENT') or hasRole('ADMIN')")
     public ResponseEntity<GlobalResponseBuilder<OrderItemResponseDTO>> getOrderItemById(
-            @PathVariable Long id) {
-        OrderItemResponseDTO responseDTO = orderItemService.getOrderItemById(id);
+            @PathVariable Long id,
+            Authentication authentication) {
+        OrderItemResponseDTO responseDTO = orderItemService.getOrderItemById(id, resolveStudentScope(authentication));
         return GlobalResponseBuilder.buildResponse("Order item retrieved successfully", responseDTO, HttpStatus.OK);
     }
     
@@ -63,8 +65,9 @@ public class OrderItemController {
     @GetMapping
     @PreAuthorize("hasRole('STUDENT') or hasRole('ADMIN')")
     public ResponseEntity<GlobalResponseBuilder<List<OrderItemResponseDTO>>> getOrderItemsByOrderId(
-            @RequestParam Long orderId) {
-        List<OrderItemResponseDTO> responseDTOs = orderItemService.getOrderItemsByOrderId(orderId);
+            @RequestParam Long orderId,
+            Authentication authentication) {
+        List<OrderItemResponseDTO> responseDTOs = orderItemService.getOrderItemsByOrderId(orderId, resolveStudentScope(authentication));
         return GlobalResponseBuilder.buildResponse("Order items retrieved successfully", responseDTOs, HttpStatus.OK);
     }
     
@@ -76,8 +79,9 @@ public class OrderItemController {
     @PreAuthorize("hasRole('STUDENT') or hasRole('ADMIN')")
     public ResponseEntity<GlobalResponseBuilder<List<OrderItemResponseDTO>>> getOrderItemsByOrderIdPaginated(
             @RequestParam Long orderId,
+            Authentication authentication,
             Pageable pageable) {
-        Page<OrderItemResponseDTO> page = orderItemService.getOrderItemsByOrderIdPaginated(orderId, pageable);
+        Page<OrderItemResponseDTO> page = orderItemService.getOrderItemsByOrderIdPaginated(orderId, pageable, resolveStudentScope(authentication));
         return GlobalResponseBuilder.buildResponse("Order items retrieved successfully", page.getContent(), HttpStatus.OK);
     }
     
@@ -90,8 +94,8 @@ public class OrderItemController {
     public ResponseEntity<GlobalResponseBuilder<Page<OrderItemResponseDTO>>> getOrderItemsByStatus(
             @RequestParam OrderStatus status,
             @PageableDefault(size = 5) Pageable pageable,
-            @AuthenticationPrincipal String studentId) {
-        Page<OrderItemResponseDTO> page = orderItemService.getOrderItemsByStatus(status, pageable, studentId);
+            Authentication authentication) {
+        Page<OrderItemResponseDTO> page = orderItemService.getOrderItemsByStatus(status, pageable, resolveStudentScope(authentication));
         return GlobalResponseBuilder.buildResponse("Order items retrieved successfully", page, HttpStatus.OK);
     }
 
@@ -145,5 +149,16 @@ public class OrderItemController {
     public ResponseEntity<GlobalResponseBuilder<Void>> deleteOrderItem(@PathVariable Long id) {
         orderItemService.deleteOrderItem(id);
         return GlobalResponseBuilder.buildResponse("Order item deleted successfully", null, HttpStatus.NO_CONTENT);
+    }
+
+    private String resolveStudentScope(Authentication authentication) {
+        if (authentication == null) {
+            return null;
+        }
+
+        boolean studentRequest = authentication.getAuthorities().stream()
+                .anyMatch(authority -> "ROLE_STUDENT".equals(authority.getAuthority()));
+
+        return studentRequest ? String.valueOf(authentication.getPrincipal()) : null;
     }
 }

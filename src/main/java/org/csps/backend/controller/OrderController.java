@@ -12,7 +12,9 @@ import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.ModelAttribute;
@@ -78,8 +80,9 @@ public class OrderController {
     @GetMapping("/{orderId}")
     @PreAuthorize("hasRole('STUDENT') or hasRole('ADMIN')")
     public ResponseEntity<GlobalResponseBuilder<OrderResponseDTO>> getOrderById(
-            @PathVariable Long orderId) {
-        OrderResponseDTO responseDTO = orderService.getOrderById(orderId);
+            @PathVariable Long orderId,
+            Authentication authentication) {
+        OrderResponseDTO responseDTO = orderService.getOrderById(orderId, resolveStudentScope(authentication));
         return GlobalResponseBuilder.buildResponse("Order retrieved successfully", responseDTO, HttpStatus.OK);
     }
 
@@ -107,8 +110,9 @@ public class OrderController {
     @PreAuthorize("hasRole('ADMIN') or hasRole('STUDENT')")
     public ResponseEntity<GlobalResponseBuilder<Page<OrderResponseDTO>>> searchOrders(
             @ModelAttribute OrderSearchDTO searchDTO,
+            Authentication authentication,
             @PageableDefault(size = 20, sort = "orderDate", direction = Sort.Direction.DESC) Pageable pageable) {
-        Page<OrderResponseDTO> results = orderService.searchOrders(searchDTO, pageable);
+        Page<OrderResponseDTO> results = orderService.searchOrders(searchDTO, pageable, resolveStudentScope(authentication));
         return GlobalResponseBuilder.buildResponse("Orders retrieved successfully", results, HttpStatus.OK);
     }
 
@@ -122,5 +126,28 @@ public class OrderController {
             @PathVariable Long orderId) {
         orderService.deleteOrder(orderId);
         return GlobalResponseBuilder.buildResponse("Order deleted successfully", null, HttpStatus.NO_CONTENT);
+    }
+
+    /**
+     * Cancel a pending order owned by the authenticated student.
+     */
+    @PatchMapping("/{orderId}/cancel")
+    @PreAuthorize("hasRole('STUDENT')")
+    public ResponseEntity<GlobalResponseBuilder<OrderResponseDTO>> cancelOrder(
+            @AuthenticationPrincipal String studentId,
+            @PathVariable Long orderId) {
+        OrderResponseDTO responseDTO = orderService.cancelOrder(studentId, orderId);
+        return GlobalResponseBuilder.buildResponse("Order cancelled successfully", responseDTO, HttpStatus.OK);
+    }
+
+    private String resolveStudentScope(Authentication authentication) {
+        if (authentication == null) {
+            return null;
+        }
+
+        boolean studentRequest = authentication.getAuthorities().stream()
+                .anyMatch(authority -> "ROLE_STUDENT".equals(authority.getAuthority()));
+
+        return studentRequest ? String.valueOf(authentication.getPrincipal()) : null;
     }
 }

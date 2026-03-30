@@ -2,6 +2,7 @@ package org.csps.backend.repository;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 import org.csps.backend.domain.entities.Order;
 import org.csps.backend.domain.enums.OrderStatus;
@@ -10,6 +11,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.stereotype.Repository;
 
@@ -24,11 +26,18 @@ public interface OrderRepository extends JpaRepository<Order, Long>, JpaSpecific
     Page<Order> findByStudentId(String studentId, Pageable pageable);
 
     @EntityGraph(value = "Order.withItemsAndDetails", type = EntityGraph.EntityGraphType.FETCH)
+    Optional<Order> findByOrderIdAndStudentStudentId(Long orderId, String studentId);
+
+    @EntityGraph(value = "Order.withItemsAndDetails", type = EntityGraph.EntityGraphType.FETCH)
     Page<Order> findAllByOrderByOrderDateDesc(Pageable pageable);
     
     /* efficient paginated query for transactions with eager loading to prevent N+1 queries */
     @EntityGraph(attributePaths = {"student", "student.userAccount", "student.userAccount.userProfile", "orderItems", "orderItems.merchVariantItem", "orderItems.merchVariantItem.merchVariant", "orderItems.merchVariantItem.merchVariant.merch"}, type = EntityGraph.EntityGraphType.FETCH)
     Page<Order> findAll(Pageable pageable);
+
+    @Override
+    @EntityGraph(attributePaths = {"student", "student.userAccount", "student.userAccount.userProfile", "orderItems", "orderItems.merchVariantItem", "orderItems.merchVariantItem.merchVariant", "orderItems.merchVariantItem.merchVariant.merch"}, type = EntityGraph.EntityGraphType.FETCH)
+    Page<Order> findAll(Specification<Order> spec, Pageable pageable);
     
     List<Order> findByOrderDateBetween(LocalDateTime start, LocalDateTime end);
     

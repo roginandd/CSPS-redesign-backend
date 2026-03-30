@@ -18,6 +18,8 @@ public class OrderSearchDTO {
     private String studentId;
     
     private String status;
+
+    private Integer year;
     
     private LocalDateTime startDate;
     

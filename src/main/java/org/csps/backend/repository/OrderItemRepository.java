@@ -1,6 +1,7 @@
 package org.csps.backend.repository;
 
 import java.util.List;
+import java.util.Optional;
 
 import org.csps.backend.domain.entities.OrderItem;
 import org.csps.backend.domain.enums.MerchType;
@@ -18,12 +19,24 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, Long> {
     
     @EntityGraph(attributePaths = {"order", "order.student", "order.student.userAccount", "order.student.userAccount.userProfile", "merchVariantItem", "merchVariantItem.merchVariant", "merchVariantItem.merchVariant.merch"}, type = EntityGraph.EntityGraphType.FETCH)
     List<OrderItem> findByOrderOrderId(Long orderId);
+
+    @EntityGraph(attributePaths = {"order", "order.student", "order.student.userAccount", "order.student.userAccount.userProfile", "merchVariantItem", "merchVariantItem.merchVariant", "merchVariantItem.merchVariant.merch"}, type = EntityGraph.EntityGraphType.FETCH)
+    Optional<OrderItem> findByOrderItemIdAndOrderStudentStudentId(Long orderItemId, String studentId);
+
+    @EntityGraph(attributePaths = {"order", "order.student", "order.student.userAccount", "order.student.userAccount.userProfile", "merchVariantItem", "merchVariantItem.merchVariant", "merchVariantItem.merchVariant.merch"}, type = EntityGraph.EntityGraphType.FETCH)
+    List<OrderItem> findByOrderOrderIdAndOrderStudentStudentId(Long orderId, String studentId);
     
     @EntityGraph(attributePaths = {"order", "order.student", "order.student.userAccount", "order.student.userAccount.userProfile", "merchVariantItem", "merchVariantItem.merchVariant", "merchVariantItem.merchVariant.merch"}, type = EntityGraph.EntityGraphType.FETCH)
     Page<OrderItem> findByOrderOrderId(Long orderId, Pageable pageable);
 
     @EntityGraph(attributePaths = {"order", "order.student", "order.student.userAccount", "order.student.userAccount.userProfile", "merchVariantItem", "merchVariantItem.merchVariant", "merchVariantItem.merchVariant.merch"}, type = EntityGraph.EntityGraphType.FETCH)
+    Page<OrderItem> findByOrderOrderIdAndOrderStudentStudentId(Long orderId, String studentId, Pageable pageable);
+
+    @EntityGraph(attributePaths = {"order", "order.student", "order.student.userAccount", "order.student.userAccount.userProfile", "merchVariantItem", "merchVariantItem.merchVariant", "merchVariantItem.merchVariant.merch"}, type = EntityGraph.EntityGraphType.FETCH)
     Page<OrderItem> findByOrderStatusAndOrderStudentStudentId(OrderStatus status, String studentId, Pageable pageable);
+
+    @EntityGraph(attributePaths = {"order", "order.student", "order.student.userAccount", "order.student.userAccount.userProfile", "merchVariantItem", "merchVariantItem.merchVariant", "merchVariantItem.merchVariant.merch"}, type = EntityGraph.EntityGraphType.FETCH)
+    Page<OrderItem> findByOrderStatusOrderByUpdatedAtDesc(OrderStatus status, Pageable pageable);
     
     @EntityGraph(attributePaths = {"order", "order.student", "order.student.userAccount", "order.student.userAccount.userProfile", "merchVariantItem", "merchVariantItem.merchVariant", "merchVariantItem.merchVariant.merch"}, type = EntityGraph.EntityGraphType.FETCH)
     Page<OrderItem> findByOrderStudentStudentIdOrderByUpdatedAtDesc(String studentId, Pageable pageable);
@@ -38,7 +51,7 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, Long> {
     /* eagerly load order item with student profile and merch details for notifications */
     @EntityGraph(attributePaths = {"order", "order.student", "order.student.userAccount", "order.student.userAccount.userProfile", "merchVariantItem", "merchVariantItem.merchVariant", "merchVariantItem.merchVariant.merch"}, type = EntityGraph.EntityGraphType.FETCH)
     @Query("SELECT oi FROM OrderItem oi WHERE oi.orderItemId = :id")
-    java.util.Optional<OrderItem> findByIdWithStudentAndMerchDetails(@Param("id") Long id);
+    Optional<OrderItem> findByIdWithStudentAndMerchDetails(@Param("id") Long id);
 
     /**
      * Find all order items for a specific merch (paginated) with eager loading.

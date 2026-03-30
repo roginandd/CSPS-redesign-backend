@@ -29,7 +29,5 @@ public class OrderItemRequestDTO {
 
     private OrderStatus orderStatus;
     
-    @NotNull(message = "Price at purchase is required")
-    @Min(value = 0, message = "Price must be non-negative")
     private Double priceAtPurchase;
 }

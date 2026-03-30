@@ -18,7 +18,7 @@ public interface OrderItemService {
     /**
      * Get order item by ID.
      */
-    OrderItemResponseDTO getOrderItemById(Long id);
+    OrderItemResponseDTO getOrderItemById(Long id, String studentId);
 
     /**
      * Filter by order status
@@ -31,13 +31,13 @@ public interface OrderItemService {
     /**
      * Get all order items for a specific order.
      */
-    List<OrderItemResponseDTO> getOrderItemsByOrderId(Long orderId);
+    List<OrderItemResponseDTO> getOrderItemsByOrderId(Long orderId, String studentId);
     
 
     /**
      * Get paginated order items for a specific order.
      */
-    Page<OrderItemResponseDTO> getOrderItemsByOrderIdPaginated(Long orderId, Pageable pageable);
+    Page<OrderItemResponseDTO> getOrderItemsByOrderIdPaginated(Long orderId, Pageable pageable, String studentId);
     
     /**
      * Get all order items for a specific student (paginated).

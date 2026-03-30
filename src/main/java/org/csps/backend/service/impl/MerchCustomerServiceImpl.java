@@ -109,12 +109,29 @@ public class MerchCustomerServiceImpl implements MerchCustomerService {
     @Override
     @Transactional
     public List<OrderResponseDTO> recordBulkMerchPayment(BulkMerchPaymentRequestDTO requestDTO) {
+        if (requestDTO == null) {
+            throw new InvalidRequestException("Bulk merch payment request is required");
+        }
+
+        if (requestDTO.getEntries() == null || requestDTO.getEntries().isEmpty()) {
+            throw new InvalidRequestException("At least one bulk payment entry is required");
+        }
+
         /* validate MerchVariantItem exists with pessimistic write lock to prevent concurrent updates */
         MerchVariantItem merchVariantItem = merchVariantItemRepository.findByIdWithLock(requestDTO.getMerchVariantItemId())
                 .orElseThrow(() -> new MerchNotFoundException(
                         "MerchVariantItem not found with ID: " + requestDTO.getMerchVariantItemId()));
 
         int quantityPerStudent = requestDTO.getQuantity() != null ? requestDTO.getQuantity() : 1;
+        if (quantityPerStudent <= 0) {
+            throw new InvalidRequestException("Quantity must be greater than 0");
+        }
+
+        MerchType merchType = merchVariantItem.getMerchVariant().getMerch().getMerchType();
+        if (merchType == MerchType.MEMBERSHIP) {
+            throw new InvalidRequestException("Bulk merch payment does not support membership items. Use the membership payment flow.");
+        }
+
         double pricePerItem = merchVariantItem.getPrice();
 
         /* validate total stock upfront before any persistence */
@@ -139,7 +156,7 @@ public class MerchCustomerServiceImpl implements MerchCustomerService {
                         .orderDate(entry.getOrderDate())
                         .totalPrice(pricePerItem * quantityPerStudent)
                         .updatedAt(now)
-                        .orderStatus(OrderStatus.CLAIMED)
+                        .orderStatus(OrderStatus.TO_BE_CLAIMED)
                         .quantity(quantityPerStudent)
                         .build();
 

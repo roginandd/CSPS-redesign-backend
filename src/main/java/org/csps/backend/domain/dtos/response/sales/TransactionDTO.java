@@ -20,5 +20,5 @@ public class TransactionDTO {
     private String membershipType; // e.g., "Non-Member", "Member"
     private BigDecimal amount;
     private String date;           // ISO 8601 or formatted date string
-    private String status;         // "PAID", "PENDING", "REJECTED"
+    private String status;         // "PENDING", "CLAIMED", "REJECTED", "CANCELLED"
 }

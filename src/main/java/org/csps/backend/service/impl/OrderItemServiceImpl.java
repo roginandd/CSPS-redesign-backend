@@ -9,6 +9,7 @@ import org.csps.backend.domain.entities.MerchVariantItem;
 import org.csps.backend.domain.entities.Order;
 import org.csps.backend.domain.entities.OrderItem;
 import org.csps.backend.domain.enums.OrderStatus;
+import org.csps.backend.exception.InvalidOrderStatusTransitionException;
 import org.csps.backend.exception.InvalidRequestException;
 import org.csps.backend.exception.OrderItemNotFoundException;
 import org.csps.backend.exception.OrderNotFoundException;
@@ -17,6 +18,7 @@ import org.csps.backend.repository.MerchVariantItemRepository;
 import org.csps.backend.repository.OrderItemRepository;
 import org.csps.backend.repository.OrderRepository;
 import org.csps.backend.service.OrderItemService;
+import org.csps.backend.service.OrderLifecycleService;
 import org.csps.backend.service.OrderNotificationService;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -34,6 +36,7 @@ public class OrderItemServiceImpl implements OrderItemService {
     private final MerchVariantItemRepository merchVariantItemRepository;
     private final OrderItemMapper orderItemMapper;
     private final OrderNotificationService orderNotificationService;
+    private final OrderLifecycleService orderLifecycleService;
     
     @Override
     @Transactional
@@ -62,19 +65,19 @@ public class OrderItemServiceImpl implements OrderItemService {
             throw new InvalidRequestException("Insufficient stock. Available: " + merchVariantItem.getStockQuantity() + 
                     ", Requested: " + orderItemRequestDTO.getQuantity());
         }
-        
-        /* validate price */
-        if (orderItemRequestDTO.getPriceAtPurchase() == null || orderItemRequestDTO.getPriceAtPurchase() < 0) {
-            throw new InvalidRequestException("Price at purchase must be non-negative");
+
+        Double priceSnapshot = merchVariantItem.getPrice();
+        if (priceSnapshot == null || priceSnapshot < 0) {
+            throw new InvalidRequestException("MerchVariantItem price must be configured before creating an order item");
         }
         
         try {
-            /* create order item with stock deduction to reserve inventory */
+            /* snapshot the current SKU price on the server to prevent client-side tampering */
             OrderItem orderItem = OrderItem.builder()
                 .order(order)
                 .merchVariantItem(merchVariantItem)
                 .quantity(orderItemRequestDTO.getQuantity())
-                .priceAtPurchase(orderItemRequestDTO.getPriceAtPurchase())
+                .priceAtPurchase(priceSnapshot)
                 .updatedAt(LocalDateTime.now())
                 .build();
             
@@ -110,13 +113,17 @@ public class OrderItemServiceImpl implements OrderItemService {
     }
     
     @Override
-    public OrderItemResponseDTO getOrderItemById(Long id) {
+    public OrderItemResponseDTO getOrderItemById(Long id, String studentId) {
         if (id == null || id <= 0) {
             throw new InvalidRequestException("Invalid order item ID");
         }
-        
-        OrderItem orderItem = orderItemRepository.findById(id)
-            .orElseThrow(() -> new OrderItemNotFoundException("Order item not found"));
+
+        String studentScope = normalizeStudentScope(studentId);
+        OrderItem orderItem = studentScope == null
+            ? orderItemRepository.findByIdWithStudentAndMerchDetails(id)
+                .orElseThrow(() -> new OrderItemNotFoundException("Order item not found"))
+            : orderItemRepository.findByOrderItemIdAndOrderStudentStudentId(id, studentScope)
+                .orElseThrow(() -> new OrderItemNotFoundException("Order item not found"));
         
         return orderItemMapper.toResponseDTO(orderItem);
     }
@@ -127,44 +134,46 @@ public class OrderItemServiceImpl implements OrderItemService {
             throw new InvalidRequestException("Order status is required");
         }
         
-        if (studentId == null || studentId.isEmpty()) {
-            throw new InvalidRequestException("Student ID is required");
-        }
-        
-        Page<OrderItem> orderItems = orderItemRepository.findByOrderStatusAndOrderStudentStudentId(status, studentId, pageable);
+        String studentScope = normalizeStudentScope(studentId);
+        Page<OrderItem> orderItems = studentScope == null
+            ? orderItemRepository.findByOrderStatusOrderByUpdatedAtDesc(status, pageable)
+            : orderItemRepository.findByOrderStatusAndOrderStudentStudentId(status, studentScope, pageable);
+
         return orderItems.map(orderItemMapper::toResponseDTO);
 
     }
 
     @Override
-    public List<OrderItemResponseDTO> getOrderItemsByOrderId(Long orderId) {
+    public List<OrderItemResponseDTO> getOrderItemsByOrderId(Long orderId, String studentId) {
         if (orderId == null || orderId <= 0) {
             throw new InvalidRequestException("Invalid order ID");
         }
-        
-        // Verify order exists
-        if (!orderRepository.existsById(orderId)) {
-            throw new OrderNotFoundException("Order not found");
-        }
-        
-        List<OrderItem> orderItems = orderItemRepository.findByOrderOrderId(orderId);
+
+        String studentScope = normalizeStudentScope(studentId);
+        validateOrderAccess(orderId, studentScope);
+
+        List<OrderItem> orderItems = studentScope == null
+            ? orderItemRepository.findByOrderOrderId(orderId)
+            : orderItemRepository.findByOrderOrderIdAndOrderStudentStudentId(orderId, studentScope);
+
         return orderItems.stream()
             .map(orderItemMapper::toResponseDTO)
             .toList();
     }
     
     @Override
-    public Page<OrderItemResponseDTO> getOrderItemsByOrderIdPaginated(Long orderId, Pageable pageable) {
+    public Page<OrderItemResponseDTO> getOrderItemsByOrderIdPaginated(Long orderId, Pageable pageable, String studentId) {
         if (orderId == null || orderId <= 0) {
             throw new InvalidRequestException("Invalid order ID");
         }
-        
-        // Verify order exists
-        if (!orderRepository.existsById(orderId)) {
-            throw new OrderNotFoundException("Order not found");
-        }
-        
-        Page<OrderItem> orderItems = orderItemRepository.findByOrderOrderId(orderId, pageable);
+
+        String studentScope = normalizeStudentScope(studentId);
+        validateOrderAccess(orderId, studentScope);
+
+        Page<OrderItem> orderItems = studentScope == null
+            ? orderItemRepository.findByOrderOrderId(orderId, pageable)
+            : orderItemRepository.findByOrderOrderIdAndOrderStudentStudentId(orderId, studentScope, pageable);
+
         return orderItems.map(orderItemMapper::toResponseDTO);
     }
     
@@ -202,33 +211,46 @@ public class OrderItemServiceImpl implements OrderItemService {
         if (status == null) {
             throw new InvalidRequestException("Order status is required");
         }
+
+        if (status == OrderStatus.CANCELLED) {
+            throw new InvalidOrderStatusTransitionException("Use the order cancellation flow to set CANCELLED status");
+        }
         
         OrderItem orderItem = orderItemRepository.findById(id)
             .orElseThrow(() -> new OrderItemNotFoundException("Order item not found"));
         
         OrderStatus oldStatus = orderItem.getOrderStatus();
+        Order order = orderItem.getOrder();
+
+        if (order.getOrderStatus() == OrderStatus.REJECTED || order.getOrderStatus() == OrderStatus.CANCELLED) {
+            throw new InvalidOrderStatusTransitionException("Terminal orders cannot be updated through item status changes");
+        }
+
+        if (status == OrderStatus.REJECTED) {
+            List<OrderItem> siblingItems = order.getOrderItems();
+            if (siblingItems != null && siblingItems.size() > 1) {
+                throw new InvalidOrderStatusTransitionException("Use the order rejection flow for multi-item orders");
+            }
+
+            orderLifecycleService.applyTerminalStatus(order, OrderStatus.REJECTED);
+            OrderItem updatedItem = orderItemRepository.findByIdWithStudentAndMerchDetails(id)
+                    .orElseThrow(() -> new OrderItemNotFoundException("Order item not found"));
+            return orderItemMapper.toResponseDTO(updatedItem);
+        }
+
+        validateNonTerminalStatusTransition(oldStatus, status);
+
+        if (oldStatus == status) {
+            return orderItemMapper.toResponseDTO(orderItem);
+        }
         
         try {
-            /* restore stock only when transitioning TO REJECTED status (prevent duplicate restorations) */
-            if (status == OrderStatus.REJECTED && oldStatus != OrderStatus.REJECTED) {
-                /* acquire pessimistic lock on merch variant item to ensure thread-safe stock restoration */
-                MerchVariantItem merchVariantItem = merchVariantItemRepository.findByIdWithLock(orderItem.getMerchVariantItem().getMerchVariantItemId())
-                    .orElseThrow(() -> new InvalidRequestException("MerchVariantItem not found during stock restoration"));
-                
-                /* restore stock when order is rejected */
-                int restoredStockQuantity = merchVariantItem.getStockQuantity() + orderItem.getQuantity();
-                merchVariantItem.setStockQuantity(restoredStockQuantity);
-                merchVariantItemRepository.save(merchVariantItem);
-                
-                System.out.println("Stock restored due to order rejection. Quantity: " + orderItem.getQuantity() + 
-                    " | Previous status: " + oldStatus + " -> New status: " + status);
-            }
-            
             /* update order item status */
             orderItem.setOrderStatus(status);
             orderItem.setUpdatedAt(LocalDateTime.now());
             
             OrderItem updatedOrderItem = orderItemRepository.save(orderItem);
+            syncParentOrderStatus(order);
 
             /* send notification email if order details are available */
             OrderItem itemWithDetails = orderItemRepository.findByIdWithStudentAndMerchDetails(id)
@@ -264,5 +286,65 @@ public class OrderItemServiceImpl implements OrderItemService {
         }
         
         orderItemRepository.deleteById(id);
+    }
+
+    private String normalizeStudentScope(String studentId) {
+        if (studentId == null) {
+            return null;
+        }
+
+        String trimmedStudentId = studentId.trim();
+        return trimmedStudentId.isEmpty() ? null : trimmedStudentId;
+    }
+
+    private void validateOrderAccess(Long orderId, String studentId) {
+        boolean orderAccessible = studentId == null
+            ? orderRepository.existsById(orderId)
+            : orderRepository.findByOrderIdAndStudentStudentId(orderId, studentId).isPresent();
+
+        if (!orderAccessible) {
+            throw new OrderNotFoundException("Order not found");
+        }
+    }
+
+    private void validateNonTerminalStatusTransition(OrderStatus oldStatus, OrderStatus newStatus) {
+        if (newStatus != OrderStatus.TO_BE_CLAIMED && newStatus != OrderStatus.CLAIMED) {
+            throw new InvalidOrderStatusTransitionException("Only TO_BE_CLAIMED or CLAIMED are allowed through item updates");
+        }
+
+        if (oldStatus == OrderStatus.REJECTED || oldStatus == OrderStatus.CANCELLED) {
+            throw new InvalidOrderStatusTransitionException("Terminal order items cannot be updated");
+        }
+
+        if (oldStatus == OrderStatus.PENDING && newStatus == OrderStatus.CLAIMED) {
+            throw new InvalidOrderStatusTransitionException("Pending items must move to TO_BE_CLAIMED before CLAIMED");
+        }
+    }
+
+    private void syncParentOrderStatus(Order order) {
+        if (order == null || order.getOrderItems() == null || order.getOrderItems().isEmpty()) {
+            return;
+        }
+
+        if (order.getOrderStatus() == OrderStatus.REJECTED || order.getOrderStatus() == OrderStatus.CANCELLED) {
+            return;
+        }
+
+        boolean allClaimed = order.getOrderItems().stream()
+                .allMatch(item -> item.getOrderStatus() == OrderStatus.CLAIMED);
+
+        boolean anyReadyOrClaimed = order.getOrderItems().stream()
+                .anyMatch(item -> item.getOrderStatus() == OrderStatus.TO_BE_CLAIMED
+                        || item.getOrderStatus() == OrderStatus.CLAIMED);
+
+        OrderStatus derivedStatus = allClaimed
+                ? OrderStatus.CLAIMED
+                : anyReadyOrClaimed ? OrderStatus.TO_BE_CLAIMED : OrderStatus.PENDING;
+
+        if (order.getOrderStatus() != derivedStatus) {
+            order.setOrderStatus(derivedStatus);
+            order.setUpdatedAt(LocalDateTime.now());
+            orderRepository.save(order);
+        }
     }
 }

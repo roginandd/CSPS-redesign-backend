@@ -63,7 +63,9 @@ public class OrderItem {
     @PrePersist
     protected void onCreate() {
         this.updatedAt = LocalDateTime.now();
-        this.orderStatus = OrderStatus.PENDING;
+        if (this.orderStatus == null) {
+            this.orderStatus = OrderStatus.PENDING;
+        }
     }
 
 }

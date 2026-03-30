@@ -29,7 +29,7 @@ public interface OrderService {
     /**
      * Get order by ID.
      */
-    OrderResponseDTO getOrderById(Long orderId);
+    OrderResponseDTO getOrderById(Long orderId, String studentId);
     
     /**
      * Get all orders for a specific student.
@@ -48,11 +48,16 @@ public interface OrderService {
      * All filter fields are optional.
      * Dynamic pagination and sorting.
      */
-    Page<OrderResponseDTO> searchOrders(OrderSearchDTO searchDTO, Pageable pageable);
+    Page<OrderResponseDTO> searchOrders(OrderSearchDTO searchDTO, Pageable pageable, String studentId);
 
     /**
      * Delete order and all its items.
      */
     void deleteOrder(Long orderId);
+
+    /**
+     * Cancel a pending order owned by the authenticated student.
+     */
+    OrderResponseDTO cancelOrder(String studentId, Long orderId);
 }
 
