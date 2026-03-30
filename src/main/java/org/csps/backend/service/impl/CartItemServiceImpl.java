@@ -142,7 +142,7 @@ public class CartItemServiceImpl implements CartItemService {
         // If quantity is 0, delete the item
         if (quantity == 0) {
             cartItemRepository.deleteById(cartItemId);
-            throw new CartItemNotFoundException("Cart item removed (quantity set to 0)");
+            return null;
         }
 
         // Verify stock availability

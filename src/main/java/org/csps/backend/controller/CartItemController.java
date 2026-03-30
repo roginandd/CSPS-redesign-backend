@@ -54,7 +54,7 @@ public class CartItemController {
     }
 
     /**
-     * Update cart item quantity.
+     * Edit a cart item by updating its quantity.
      */
     @PutMapping("/{merchVariantItemId}")
     @PreAuthorize("hasRole('STUDENT')")
