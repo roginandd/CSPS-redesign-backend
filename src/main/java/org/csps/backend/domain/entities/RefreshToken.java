@@ -34,9 +34,13 @@ public class RefreshToken {
     private UserAccount userAccount;
 
     @PrePersist
-    public void setExpiryDate() {
+    public void initializeExpiryDate() {
         if (expiryDate == null) {
-            expiryDate = Instant.now().plus(Duration.ofDays(7)); 
+            refreshExpiryDate();
         }
+    }
+
+    public void refreshExpiryDate() {
+        expiryDate = Instant.now().plus(Duration.ofDays(7));
     }
 }

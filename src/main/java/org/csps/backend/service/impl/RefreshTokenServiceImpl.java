@@ -4,7 +4,6 @@ import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 
-import org.csps.backend.domain.dtos.request.SignInCredentialRequestDTO;
 import org.csps.backend.domain.entities.RefreshToken;
 import org.csps.backend.domain.entities.UserAccount;
 import org.csps.backend.repository.RefreshTokenRepository;
@@ -20,11 +19,9 @@ import lombok.RequiredArgsConstructor;
 @Service
 @Builder
 @RequiredArgsConstructor
-public class RefreshTokenServiceImpl implements RefreshTokenService{
+public class RefreshTokenServiceImpl implements RefreshTokenService {
     private final UserAccountService userAccountService;
-
     private final RefreshTokenRepository refreshTokenRepository;
-
     private final JwtService jwtService;
 
     @Override
@@ -32,26 +29,20 @@ public class RefreshTokenServiceImpl implements RefreshTokenService{
         UserAccount user = userAccountService.findById(userId)
                 .orElseThrow(() -> new UsernameNotFoundException("User not found"));
 
-        // Check if the user already has a refresh token
-        Optional<RefreshToken> existingToken = refreshTokenRepository.findByUserAccount(user);
+        RefreshToken refreshToken = refreshTokenRepository.findByUserAccount(user)
+                .orElseGet(() -> {
+                    RefreshToken newToken = new RefreshToken();
+                    newToken.setUserAccount(user);
+                    return newToken;
+                });
 
-        RefreshToken refreshToken;
-        if (existingToken.isPresent()) {
-            refreshToken = existingToken.get();
-            refreshToken.setRefreshToken(UUID.randomUUID().toString());
-            refreshToken.setExpiryDate();
-        } else {
-            refreshToken = new RefreshToken();
-            refreshToken.setUserAccount(user);
-            refreshToken.setRefreshToken(UUID.randomUUID().toString());
-            refreshToken.setExpiryDate();
-        }
-
+        refreshToken.setRefreshToken(UUID.randomUUID().toString());
+        refreshToken.refreshExpiryDate();
         return refreshTokenRepository.save(refreshToken);
     }
 
     @Override
-    public Optional<RefreshToken> findByRefreshToken (String token) {
+    public Optional<RefreshToken> findByRefreshToken(String token) {
         return refreshTokenRepository.findByRefreshToken(token);
     }
 
@@ -61,9 +52,9 @@ public class RefreshTokenServiceImpl implements RefreshTokenService{
     }
 
     @Override
-    public void deleteByUserId (Long userId) {
+    public void deleteByUserId(Long userId) {
         UserAccount user = userAccountService.findById(userId)
-                    .orElseThrow(() -> new UsernameNotFoundException("User not found"));
+                .orElseThrow(() -> new UsernameNotFoundException("User not found"));
 
         refreshTokenRepository.deleteByUserAccount(user);
     }
@@ -74,17 +65,19 @@ public class RefreshTokenServiceImpl implements RefreshTokenService{
                 .flatMap(token -> {
                     if (!isValidRefreshToken(token)) {
                         deleteRefreshToken(token);
-                        return Optional.empty(); 
+                        return Optional.empty();
                     }
+
                     UserAccount user = token.getUserAccount();
+                    token.setRefreshToken(UUID.randomUUID().toString());
+                    token.refreshExpiryDate();
+                    refreshTokenRepository.save(token);
                     return Optional.of(jwtService.generateAccessToken(user));
                 });
     }
 
-	@Override
-	public void deleteRefreshToken(RefreshToken token) {
+    @Override
+    public void deleteRefreshToken(RefreshToken token) {
         refreshTokenRepository.delete(token);
-	}
-
-
+    }
 }

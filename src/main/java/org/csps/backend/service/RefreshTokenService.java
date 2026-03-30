@@ -10,6 +10,6 @@ public interface RefreshTokenService {
     boolean isValidRefreshToken(RefreshToken token);
     void deleteRefreshToken(RefreshToken token);
     void deleteByUserId(Long userId);
-    Optional<String> refreshAccessToken(String accessToken);
+    Optional<String> refreshAccessToken(String refreshToken);
 
 }

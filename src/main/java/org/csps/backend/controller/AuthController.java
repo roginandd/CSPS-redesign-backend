@@ -14,7 +14,6 @@ import org.csps.backend.domain.entities.UserAccount;
 import org.csps.backend.security.JwtService;
 import org.csps.backend.service.AdminService;
 import org.csps.backend.service.EmailVerificationService;
-import org.csps.backend.service.RefreshTokenService;
 import org.csps.backend.service.StudentService;
 import org.csps.backend.service.UserAccountService;
 import org.csps.backend.service.UserService;
@@ -42,8 +41,6 @@ public class AuthController {
     private final UserAccountService userAccountService;
     private final UserService userService;
     private final EmailVerificationService emailVerificationService; // Inject EmailVerificationService
-
-    private final RefreshTokenService refreshTokenService;
     private final JwtService jwtService;
     private final StudentService studentService;
     private final AdminService adminService;
@@ -83,18 +80,7 @@ public class AuthController {
 
     // logout
     @PostMapping("/logout")
-    public ResponseEntity<GlobalResponseBuilder<String>> logout(@RequestBody(required = false) Map<String, String> requestBody) {
-        String refreshToken = null;
-        if (requestBody != null && requestBody.containsKey("refreshToken")) {
-            refreshToken = requestBody.get("refreshToken");
-        }
-        
-        // Delete refresh token from database if it exists
-        if (refreshToken != null && !refreshToken.isBlank()) {
-            refreshTokenService.findByRefreshToken(refreshToken)
-                .ifPresent(refreshTokenService::deleteRefreshToken);
-        }
-        
+    public ResponseEntity<GlobalResponseBuilder<String>> logout() {
         return GlobalResponseBuilder.buildResponse(
             "Logout successful",
             null,
@@ -118,38 +104,6 @@ public class AuthController {
             null,
             HttpStatus.OK
         );
-    }
-
-    // refresh token
-    @PostMapping("/refresh")
-    public ResponseEntity<GlobalResponseBuilder<AuthResponseDTO>> refresh(
-        @RequestBody Map<String, String> requestBody
-    ) {
-        String requestToken = requestBody.get("refreshToken");
-        if (requestToken == null || requestToken.isBlank()) {
-            return GlobalResponseBuilder.buildResponse(
-                "Refresh token is missing",
-                null,
-                HttpStatus.BAD_REQUEST
-            );
-        }
-
-        var result = refreshTokenService.refreshAccessToken(requestToken);
-        if (result.isPresent()) {
-            String newAccessToken = result.get();
-            
-            return GlobalResponseBuilder.buildResponse(
-                "Access token refreshed successfully",
-                new AuthResponseDTO(newAccessToken),
-                HttpStatus.OK
-            );
-        } else {
-            return GlobalResponseBuilder.buildResponse(
-                "Invalid or expired refresh token",
-                null,
-                HttpStatus.UNAUTHORIZED
-            );
-        }
     }
 
     // get student profile
