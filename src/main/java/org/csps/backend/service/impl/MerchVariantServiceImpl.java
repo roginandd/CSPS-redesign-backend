@@ -13,6 +13,7 @@ import org.csps.backend.exception.MerchNotFoundException;
 import org.csps.backend.exception.MerchVariantAlreadyExisted;
 import org.csps.backend.exception.MerchVariantNotFoundException;
 import org.csps.backend.mapper.MerchVariantMapper;
+import org.csps.backend.repository.CartItemRepository;
 import org.csps.backend.repository.MerchRepository;
 import org.csps.backend.repository.MerchVariantRepository;
 import org.csps.backend.repository.OrderItemRepository;
@@ -37,7 +38,7 @@ public class MerchVariantServiceImpl implements MerchVariantService {
     private final MerchVariantMapper merchVariantMapper;
     private final MerchRepository merchRepository;
     private final OrderItemRepository orderItemRepository;
-    
+    private final CartItemRepository cartItemRepository;
     private final S3Service s3Service;
     private final MerchVariantItemService merchVariantItemService;
 
@@ -61,8 +62,11 @@ public class MerchVariantServiceImpl implements MerchVariantService {
                 if (dto.getColor() == null || dto.getColor().trim().isEmpty()) {
                     throw new InvalidRequestException("color is required for clothing variants");
                 }
+                if (dto.getDesign() != null && !dto.getDesign().trim().isEmpty()) {
+                    throw new InvalidRequestException("design is not allowed for clothing variants");
+                }
             
-                if (merchVariantRepository.existsByMerchMerchIdAndColor(merchId, dto.getColor())) {
+                if (merchVariantRepository.existsByMerchMerchIdAndColor(merchId, dto.getColor().trim())) {
                     throw new MerchVariantAlreadyExisted("Variant with color " + dto.getColor() + " already exists");
                 }
             }
@@ -71,7 +75,10 @@ public class MerchVariantServiceImpl implements MerchVariantService {
                 if (dto.getDesign() == null || dto.getDesign().trim().isEmpty()) {
                     throw new InvalidRequestException("design is required for this merch type");
                 }
-                if (merchVariantRepository.existsByMerchMerchIdAndDesign(merchId, dto.getDesign())) {
+                if (dto.getColor() != null && !dto.getColor().trim().isEmpty()) {
+                    throw new InvalidRequestException("color is not allowed for this merch type");
+                }
+                if (merchVariantRepository.existsByMerchMerchIdAndDesign(merchId, dto.getDesign().trim())) {
                     throw new MerchVariantAlreadyExisted("Variant with design " + dto.getDesign() + " already exists");
                 }
             }
@@ -89,17 +96,16 @@ public class MerchVariantServiceImpl implements MerchVariantService {
         // Save variant once (before image upload so we have ID for S3 path)
         MerchVariant saved = merchVariantRepository.save(variant);
 
-        // Upload variant image and update S3 key if provided
-        if (dto.getVariantImage() != null && !dto.getVariantImage().isEmpty()) {
-            String s3ImageKey = s3Service.uploadFile(dto.getVariantImage(), saved.getMerchVariantId(), "merchVariant");
-            saved.setS3ImageKey(s3ImageKey);
-            // Update with new S3 key in single save
-            saved = merchVariantRepository.save(saved);
-        }
-
         // Add items if provided (batch save handled in service)
         if (dto.getVariantItems() != null && !dto.getVariantItems().isEmpty()) {
             merchVariantItemService.addMultipleItemsToVariant(saved.getMerchVariantId(), dto.getVariantItems());
+        }
+
+        // Upload the image only after variant item validation/persistence succeeds.
+        if (dto.getVariantImage() != null && !dto.getVariantImage().isEmpty()) {
+            String s3ImageKey = s3Service.uploadFile(dto.getVariantImage(), saved.getMerchVariantId(), "merchVariant");
+            saved.setS3ImageKey(s3ImageKey);
+            saved = merchVariantRepository.save(saved);
         }
 
         return merchVariantMapper.toResponseDTO(saved);
@@ -179,25 +185,23 @@ public class MerchVariantServiceImpl implements MerchVariantService {
     @Override
     @Transactional
     public void deleteVariant(Long merchVariantId) {
-        // Verify variant exists
         MerchVariant variant = merchVariantRepository.findById(merchVariantId)
                 .orElseThrow(() -> new MerchVariantNotFoundException("MerchVariant not found with id: " + merchVariantId));
-
-        /* check if variant items are in any orders; prevent deletion if in use */
+        
+        if (cartItemRepository.existsByMerchVariantItemMerchVariantMerchVariantId(merchVariantId)) {
+            throw new InvalidRequestException("Cannot delete variant that has items in carts");
+        }
         if (orderItemRepository.existsByMerchVariantItemMerchVariantMerchVariantId(merchVariantId)) {
             throw new InvalidRequestException("Cannot delete variant that has items in orders");
         }
         
         merchVariantRepository.delete(variant);
 
-        // Delete S3 image if not placeholder
         if (variant.getS3ImageKey() != null 
             && !variant.getS3ImageKey().isEmpty() 
             && !variant.getS3ImageKey().equals("placeholder")) {
             s3Service.deleteFile(variant.getS3ImageKey());
-            // Delete variant (cascades to items)
         }
-
     }
 
 }

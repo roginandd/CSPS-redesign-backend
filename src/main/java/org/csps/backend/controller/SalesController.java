@@ -9,6 +9,7 @@ import org.csps.backend.service.SalesService;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -45,7 +46,10 @@ public class SalesController {
             @RequestParam(defaultValue = "6") int size,
             @ModelAttribute OrderSearchDTO search) {
         
-        Pageable pageable = PageRequest.of(page, size);
+        Pageable pageable = PageRequest.of(
+            page,
+            size,
+            Sort.by(Sort.Direction.DESC, "orderDate").and(Sort.by(Sort.Direction.DESC, "orderId")));
         Page<TransactionDTO> transactions = salesService.getTransactions(pageable, search);
         return GlobalResponseBuilder.buildResponse("Transactions retrieved successfully", transactions, HttpStatus.OK);
     }

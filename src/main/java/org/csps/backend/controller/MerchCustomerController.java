@@ -11,6 +11,7 @@ import org.csps.backend.service.MerchCustomerService;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -53,9 +54,11 @@ public class MerchCustomerController {
     public ResponseEntity<Page<MerchCustomerResponseDTO>> getCustomersByMerchId(
             @PathVariable Long merchId,
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "7") int size) {
-        Pageable pageable = PageRequest.of(page, size);
-        Page<MerchCustomerResponseDTO> customers = merchCustomerService.getCustomersByMerchId(merchId, pageable);
+            @RequestParam(defaultValue = "7") int size,
+            @RequestParam(defaultValue = "true") boolean includeFreebies
+            ) {
+        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "orderItemId"));
+        Page<MerchCustomerResponseDTO> customers = merchCustomerService.getCustomersByMerchId(merchId, pageable, includeFreebies);
         return ResponseEntity.ok(customers);
     }
 
@@ -75,9 +78,10 @@ public class MerchCustomerController {
             @PathVariable Long merchId,
             @RequestParam OrderStatus status,
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "7") int size) {
-        Pageable pageable = PageRequest.of(page, size);
-        Page<MerchCustomerResponseDTO> customers = merchCustomerService.getCustomersByMerchIdAndStatus(merchId, status, pageable);
+            @RequestParam(defaultValue = "7") int size,
+            @RequestParam(defaultValue = "true") boolean includeFreebies) {
+        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "orderItemId"));
+        Page<MerchCustomerResponseDTO> customers = merchCustomerService.getCustomersByMerchIdAndStatus(merchId, status, pageable, includeFreebies);
         return ResponseEntity.ok(customers);
     }
 
@@ -90,8 +94,10 @@ public class MerchCustomerController {
      */
     @GetMapping("/{merchId}/count")
     @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<Map<String, Long>> getCustomerCountByMerchId(@PathVariable Long merchId) {
-        long count = merchCustomerService.getCustomerCountByMerchId(merchId);
+    public ResponseEntity<Map<String, Long>> getCustomerCountByMerchId(
+            @PathVariable Long merchId,
+            @RequestParam(defaultValue = "true") boolean includeFreebies) {
+        long count = merchCustomerService.getCustomerCountByMerchId(merchId, includeFreebies);
         return ResponseEntity.ok(Map.of("count", count));
     }
 
@@ -136,8 +142,9 @@ public class MerchCustomerController {
     @GetMapping("/{merchId}/export")
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<List<MerchCustomerResponseDTO>> exportCustomersByMerchId(
-            @PathVariable Long merchId) {
-        List<MerchCustomerResponseDTO> customers = merchCustomerService.getAllCustomersByMerchId(merchId);
+            @PathVariable Long merchId,
+            @RequestParam(defaultValue = "true") boolean includeFreebies) {
+        List<MerchCustomerResponseDTO> customers = merchCustomerService.getAllCustomersByMerchId(merchId, includeFreebies);
         return ResponseEntity.ok(customers);
     }
 }

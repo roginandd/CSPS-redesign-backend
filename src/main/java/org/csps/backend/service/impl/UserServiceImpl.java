@@ -109,7 +109,7 @@ public class UserServiceImpl implements UserService {
 
         String tempPassword = String.format("%s%s", passwordFormat, studentId);
         userAccount.setPassword(passwordEncoder.encode(tempPassword)); // Hash the password
-        userAccount.setUsername(String.format("%s-%s", userNameFormat, studentId));
+        userAccount.setUsername(String.format("%s%s", userNameFormat, studentId));
         userAccount.setRole(UserRole.STUDENT);
 
         

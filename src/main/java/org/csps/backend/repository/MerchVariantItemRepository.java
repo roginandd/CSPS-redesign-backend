@@ -49,4 +49,5 @@ public interface MerchVariantItemRepository extends JpaRepository<MerchVariantIt
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT mvi FROM MerchVariantItem mvi WHERE mvi.merchVariantItemId = :id")
     Optional<MerchVariantItem> findByIdWithLock(Long id);
+
 }

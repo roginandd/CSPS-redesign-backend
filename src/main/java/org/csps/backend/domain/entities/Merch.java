@@ -31,7 +31,7 @@ public class Merch {
     @Column(nullable = false)
     private String merchName;
 
-    @Column(nullable = false, length=1000)
+    @Column(nullable = false, length = 1000)
     private String description;
 
     @Enumerated(EnumType.STRING)
@@ -42,11 +42,15 @@ public class Merch {
     private Double basePrice;
 
     @Column(nullable = false)
-    private String s3ImageKey;  // S3 object key of the first variant's image - REQUIRED
+    private String s3ImageKey;
 
     @Column(nullable = false)
     @Builder.Default
-    private Boolean isActive = true;  // soft delete flag
+    private Boolean isActive = true;
+
+    @Column(nullable = false)
+    @Builder.Default
+    private Boolean hasFreebie = false;
 
     @OneToMany(mappedBy = "merch", cascade = CascadeType.ALL, orphanRemoval = true)
     @Fetch(FetchMode.SUBSELECT)

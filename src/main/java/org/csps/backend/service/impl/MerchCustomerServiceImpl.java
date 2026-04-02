@@ -1,13 +1,16 @@
 package org.csps.backend.service.impl;
 
 import java.time.LocalDateTime;
-import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import org.csps.backend.domain.dtos.request.BulkMerchPaymentRequestDTO;
 import org.csps.backend.domain.dtos.request.BulkPaymentEntryDTO;
 import org.csps.backend.domain.dtos.response.MerchCustomerResponseDTO;
 import org.csps.backend.domain.dtos.response.OrderResponseDTO;
+import org.csps.backend.domain.dtos.response.TicketFreebieAssignmentResponseDTO;
 import org.csps.backend.domain.entities.MerchVariantItem;
 import org.csps.backend.domain.entities.Order;
 import org.csps.backend.domain.entities.OrderItem;
@@ -25,6 +28,7 @@ import org.csps.backend.repository.OrderItemRepository;
 import org.csps.backend.repository.OrderRepository;
 import org.csps.backend.repository.StudentRepository;
 import org.csps.backend.service.MerchCustomerService;
+import org.csps.backend.service.TicketFreebieAssignmentService;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -32,11 +36,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 
-/**
- * Service implementation for merch-customer relationship operations.
- * Handles admin-facing queries: customer lookup, bulk payment recording,
- * and membership eligibility checks.
- */
 @Service
 @RequiredArgsConstructor
 public class MerchCustomerServiceImpl implements MerchCustomerService {
@@ -48,76 +47,48 @@ public class MerchCustomerServiceImpl implements MerchCustomerService {
     private final MerchRepository merchRepository;
     private final CartItemRepository cartItemRepository;
     private final OrderMapper orderMapper;
+    private final TicketFreebieAssignmentService ticketFreebieAssignmentService;
 
-    /**
-     * Retrieves a paginated list of customers (order items) who purchased a specific merch.
-     * Uses EntityGraph on the repository to eagerly load student profile, order, and merch details.
-     *
-     * @param merchId  the merch ID to look up customers for
-     * @param pageable pagination details (page, size, sort)
-     * @return paginated MerchCustomerResponseDTO with student and order details
-     */
     @Override
-    public Page<MerchCustomerResponseDTO> getCustomersByMerchId(Long merchId, Pageable pageable) {
+    public Page<MerchCustomerResponseDTO> getCustomersByMerchId(Long merchId, Pageable pageable, boolean includeFreebies) {
         validateMerchExists(merchId);
         Page<OrderItem> orderItems = orderItemRepository.findByMerchId(merchId, pageable);
-        return orderItems.map(this::mapToMerchCustomerDTO);
+        Map<Long, List<TicketFreebieAssignmentResponseDTO>> assignmentsByOrderItemId =
+                loadAssignments(orderItems.getContent(), includeFreebies);
+        return orderItems.map(orderItem -> mapToMerchCustomerDTO(
+                orderItem,
+                assignmentsByOrderItemId.get(orderItem.getOrderItemId()),
+                includeFreebies));
     }
 
-    /**
-     * Retrieves a paginated list of customers for a specific merch, filtered by order status.
-     * Useful for admins who want to see only PENDING, CLAIMED, etc. orders for a merch.
-     *
-     * @param merchId  the merch ID to look up
-     * @param status   the order status filter
-     * @param pageable pagination details
-     * @return filtered paginated MerchCustomerResponseDTO
-     */
     @Override
-    public Page<MerchCustomerResponseDTO> getCustomersByMerchIdAndStatus(Long merchId, OrderStatus status, Pageable pageable) {
+    public Page<MerchCustomerResponseDTO> getCustomersByMerchIdAndStatus(Long merchId, OrderStatus status, Pageable pageable, boolean includeFreebies) {
         validateMerchExists(merchId);
         Page<OrderItem> orderItems = orderItemRepository.findByMerchIdAndOrderStatus(merchId, status, pageable);
-        return orderItems.map(this::mapToMerchCustomerDTO);
+        Map<Long, List<TicketFreebieAssignmentResponseDTO>> assignmentsByOrderItemId =
+                loadAssignments(orderItems.getContent(), includeFreebies);
+        return orderItems.map(orderItem -> mapToMerchCustomerDTO(
+                orderItem,
+                assignmentsByOrderItemId.get(orderItem.getOrderItemId()),
+                includeFreebies));
     }
 
-    /**
-     * Returns total count of order items for a specific merch.
-     * Lightweight alternative to a full page request.
-     *
-     * @param merchId the merch ID to count for
-     * @return total number of order items
-     */
     @Override
-    public long getCustomerCountByMerchId(Long merchId) {
+    public long getCustomerCountByMerchId(Long merchId, boolean includeFreebies) {
         validateMerchExists(merchId);
         return orderItemRepository.countByMerchId(merchId);
     }
 
-    /**
-     * Batch-creates orders for multiple students who already paid for a specific merch.
-     * Each entry contains a studentId and the actual orderDate (preserving real purchase dates).
-     * Uses a batch-save approach: all Order and OrderItem entities are collected
-     * into temporary lists, then persisted in two bulk saveAll() calls instead
-     * of N+1 individual saves. Stock is decremented once at the end.
-     *
-     * @param requestDTO contains entries (studentId+orderDate pairs), merchVariantItemId, and quantity
-     * @return list of created OrderResponseDTOs (one per student)
-     * @throws StudentNotFoundException if any student ID is invalid
-     * @throws MerchNotFoundException   if the MerchVariantItem ID is invalid
-     * @throws InvalidRequestException  if stock is insufficient
-     */
     @Override
     @Transactional
     public List<OrderResponseDTO> recordBulkMerchPayment(BulkMerchPaymentRequestDTO requestDTO) {
         if (requestDTO == null) {
             throw new InvalidRequestException("Bulk merch payment request is required");
         }
-
         if (requestDTO.getEntries() == null || requestDTO.getEntries().isEmpty()) {
             throw new InvalidRequestException("At least one bulk payment entry is required");
         }
 
-        /* validate MerchVariantItem exists with pessimistic write lock to prevent concurrent updates */
         MerchVariantItem merchVariantItem = merchVariantItemRepository.findByIdWithLock(requestDTO.getMerchVariantItemId())
                 .orElseThrow(() -> new MerchNotFoundException(
                         "MerchVariantItem not found with ID: " + requestDTO.getMerchVariantItemId()));
@@ -128,13 +99,15 @@ public class MerchCustomerServiceImpl implements MerchCustomerService {
         }
 
         MerchType merchType = merchVariantItem.getMerchVariant().getMerch().getMerchType();
+        Long merchId = merchVariantItem.getMerchVariant().getMerch().getMerchId();
         if (merchType == MerchType.MEMBERSHIP) {
             throw new InvalidRequestException("Bulk merch payment does not support membership items. Use the membership payment flow.");
         }
+        if (merchType == MerchType.TICKET && quantityPerStudent > 1) {
+            throw new InvalidRequestException("Quantity for ticket items must remain 1");
+        }
 
         double pricePerItem = merchVariantItem.getPrice();
-
-        /* validate total stock upfront before any persistence */
         int totalStockNeeded = quantityPerStudent * requestDTO.getEntries().size();
         if (merchVariantItem.getStockQuantity() < totalStockNeeded) {
             throw new InvalidRequestException(
@@ -143,71 +116,65 @@ public class MerchCustomerServiceImpl implements MerchCustomerService {
         }
 
         try {
-            /* PHASE 1: Build all Order entities using each entry's actual orderDate */
-            List<Order> ordersToSave = new ArrayList<>();
+            List<Order> ordersToSave = new java.util.ArrayList<>();
+            List<Student> students = new java.util.ArrayList<>();
             LocalDateTime now = LocalDateTime.now();
+            Set<String> seenStudentIds = new LinkedHashSet<>();
 
             for (BulkPaymentEntryDTO entry : requestDTO.getEntries()) {
-                Student student = studentRepository.findByStudentId(entry.getStudentId())
-                        .orElseThrow(() -> new StudentNotFoundException("Student not found with ID: " + entry.getStudentId()));
+                String studentId = normalizeStudentId(entry);
+                if (!seenStudentIds.add(studentId)) {
+                    throw new InvalidRequestException("Duplicate student ID in bulk payment request: " + studentId);
+                }
+                if (merchType == MerchType.TICKET) {
+                    validateTicketBulkPaymentEligibility(studentId, merchId);
+                }
 
-                Order order = Order.builder()
+                Student student = studentRepository.findByStudentId(studentId)
+                        .orElseThrow(() -> new StudentNotFoundException("Student not found with ID: " + studentId));
+                students.add(student);
+
+                ordersToSave.add(Order.builder()
                         .student(student)
                         .orderDate(entry.getOrderDate())
                         .totalPrice(pricePerItem * quantityPerStudent)
                         .updatedAt(now)
                         .orderStatus(OrderStatus.TO_BE_CLAIMED)
                         .quantity(quantityPerStudent)
-                        .build();
-
-                ordersToSave.add(order);
+                        .build());
             }
 
-            /* PHASE 2: Batch-save all Orders in one round-trip */
             List<Order> savedOrders = orderRepository.saveAll(ordersToSave);
+            List<OrderItem> orderItemsToSave = new java.util.ArrayList<>();
 
-            /* PHASE 3: Build all OrderItem entities referencing their saved Orders */
-            List<OrderItem> orderItemsToSave = new ArrayList<>();
-
-            for (Order savedOrder : savedOrders) {
-                OrderItem orderItem = OrderItem.builder()
+            for (int index = 0; index < savedOrders.size(); index++) {
+                Order savedOrder = savedOrders.get(index);
+                orderItemsToSave.add(OrderItem.builder()
                         .order(savedOrder)
                         .merchVariantItem(merchVariantItem)
                         .quantity(quantityPerStudent)
                         .priceAtPurchase(pricePerItem)
                         .orderStatus(OrderStatus.TO_BE_CLAIMED)
-                        .build();
-
-                orderItemsToSave.add(orderItem);
+                        .build());
             }
 
-            /* PHASE 4: Batch-save all OrderItems in one round-trip */
-            orderItemRepository.saveAll(orderItemsToSave);
+            List<OrderItem> savedItems = orderItemRepository.saveAll(orderItemsToSave);
+            for (OrderItem savedItem : savedItems) {
+                if (savedItem.getMerchVariantItem().getMerchVariant().getMerch().getMerchType() == MerchType.TICKET) {
+                    ticketFreebieAssignmentService.initializeAssignments(savedItem.getOrderItemId(), List.of());
+                }
+            }
 
-            /* PHASE 5: Decrement stock once and persist (pessimistic lock already held) */
             merchVariantItem.setStockQuantity(merchVariantItem.getStockQuantity() - totalStockNeeded);
             merchVariantItemRepository.save(merchVariantItem);
 
-            /* Map saved orders to response DTOs */
-            return savedOrders.stream()
-                    .map(orderMapper::toResponseDTO)
-                    .toList();
+            return savedOrders.stream().map(orderMapper::toResponseDTO).toList();
         } catch (Exception e) {
-            /* log error and rethrow to trigger transaction rollback */
-            System.err.println("Error recording bulk merch payment: " + e.getMessage());
-            e.printStackTrace();
-            throw new InvalidRequestException("Failed to record bulk merch payment: " + e.getMessage());
+            throw e instanceof InvalidRequestException ? (InvalidRequestException) e
+                : new InvalidRequestException("Failed to record bulk merch payment: " + e.getMessage());
         }
     }
 
-    /**
-     * Checks whether a student has a MEMBERSHIP merch type in their cart
-     * OR in any PENDING order. This combined check is used to determine
-     * whether to hide MEMBERSHIP merch from the store listing.
-     *
-     * @param studentId the student ID to check
-     * @return true if membership is already in cart or pending order
-     */
     @Override
     public boolean hasMembershipInCartOrPendingOrder(String studentId) {
         boolean inCart = cartItemRepository.existsByStudentIdAndMerchType(studentId, MerchType.MEMBERSHIP);
@@ -216,31 +183,24 @@ public class MerchCustomerServiceImpl implements MerchCustomerService {
         return inCart || inPendingOrder;
     }
 
-    /**
-     * Retrieves ALL customers (order items) for a specific merch without pagination.
-     * Useful for exporting the full customer list to CSV.
-     *
-     * @param merchId the merch ID to look up customers for
-     * @return complete list of MerchCustomerResponseDTO
-     */
     @Override
-    public List<MerchCustomerResponseDTO> getAllCustomersByMerchId(Long merchId) {
+    public List<MerchCustomerResponseDTO> getAllCustomersByMerchId(Long merchId, boolean includeFreebies) {
         validateMerchExists(merchId);
         List<OrderItem> orderItems = orderItemRepository.findAllByMerchId(merchId);
+        Map<Long, List<TicketFreebieAssignmentResponseDTO>> assignmentsByOrderItemId =
+                loadAssignments(orderItems, includeFreebies);
         return orderItems.stream()
-                .map(this::mapToMerchCustomerDTO)
+                .map(orderItem -> mapToMerchCustomerDTO(
+                        orderItem,
+                        assignmentsByOrderItemId.get(orderItem.getOrderItemId()),
+                        includeFreebies))
                 .toList();
     }
 
-    /**
-     * Maps an OrderItem entity to a MerchCustomerResponseDTO.
-     * Extracts student profile data, merch variant details, and order info
-     * into a flat DTO suitable for admin views.
-     *
-     * @param orderItem the order item entity to map
-     * @return populated MerchCustomerResponseDTO
-     */
-    private MerchCustomerResponseDTO mapToMerchCustomerDTO(OrderItem orderItem) {
+    private MerchCustomerResponseDTO mapToMerchCustomerDTO(
+            OrderItem orderItem,
+            List<TicketFreebieAssignmentResponseDTO> freebieAssignments,
+            boolean includeFreebies) {
         var order = orderItem.getOrder();
         var student = order.getStudent();
         var userProfile = student.getUserAccount().getUserProfile();
@@ -252,6 +212,7 @@ public class MerchCustomerServiceImpl implements MerchCustomerService {
                 + " " + (userProfile.getLastName() != null ? userProfile.getLastName() : "");
 
         return MerchCustomerResponseDTO.builder()
+                .orderItemId(orderItem.getOrderItemId())
                 .studentId(student.getStudentId())
                 .studentName(studentName.trim())
                 .yearLevel(student.getYearLevel())
@@ -264,15 +225,74 @@ public class MerchCustomerServiceImpl implements MerchCustomerService {
                 .orderStatus(orderItem.getOrderStatus())
                 .orderDate(order.getOrderDate())
                 .s3ImageKey(merchVariant.getS3ImageKey())
+                .hasFreebie(resolveHasFreebie(merchTypeOf(merch), merch, freebieAssignments, includeFreebies))
+                .freebieAssignments(includeFreebies ? defaultAssignments(freebieAssignments) : null)
                 .build();
     }
 
-    /**
-     * Validates that a Merch entity exists by its ID.
-     * Throws MerchNotFoundException if the merch doesn't exist.
-     *
-     * @param merchId the merch ID to validate
-     */
+    private Map<Long, List<TicketFreebieAssignmentResponseDTO>> loadAssignments(
+            List<OrderItem> orderItems,
+            boolean includeFreebies) {
+        if (!includeFreebies || orderItems == null || orderItems.isEmpty()) {
+            return Map.of();
+        }
+
+        List<Long> orderItemIds = orderItems.stream()
+                .map(OrderItem::getOrderItemId)
+                .filter(id -> id != null)
+                .toList();
+        if (orderItemIds.isEmpty()) {
+            return Map.of();
+        }
+
+        return ticketFreebieAssignmentService.getAssignmentsByOrderItemIds(orderItemIds);
+    }
+
+    private Boolean resolveHasFreebie(
+            MerchType merchType,
+            org.csps.backend.domain.entities.Merch merch,
+            List<TicketFreebieAssignmentResponseDTO> freebieAssignments,
+            boolean includeFreebies) {
+        if (!includeFreebies) {
+            return merchType == MerchType.TICKET && Boolean.TRUE.equals(merch.getHasFreebie());
+        }
+
+        return defaultAssignments(freebieAssignments).stream()
+                .anyMatch(assignment -> Boolean.TRUE.equals(assignment.getHasFreebie()));
+    }
+
+    private List<TicketFreebieAssignmentResponseDTO> defaultAssignments(
+            List<TicketFreebieAssignmentResponseDTO> freebieAssignments) {
+        return freebieAssignments == null ? List.of() : freebieAssignments;
+    }
+
+    private MerchType merchTypeOf(org.csps.backend.domain.entities.Merch merch) {
+        return merch == null ? null : merch.getMerchType();
+    }
+
+    private String normalizeStudentId(BulkPaymentEntryDTO entry) {
+        if (entry == null) {
+            throw new InvalidRequestException("Bulk payment entry is required");
+        }
+        if (entry.getStudentId() == null || entry.getStudentId().trim().isEmpty()) {
+            throw new InvalidRequestException("Student ID is required");
+        }
+        if (entry.getOrderDate() == null) {
+            throw new InvalidRequestException("Order date is required");
+        }
+        return entry.getStudentId().trim();
+    }
+
+    private void validateTicketBulkPaymentEligibility(String studentId, Long merchId) {
+        if (cartItemRepository.existsByStudentIdAndMerchId(studentId, merchId)
+                || orderItemRepository.existsByStudentIdAndMerchIdAndOrderStatusNotIn(
+                        studentId,
+                        merchId,
+                        List.of(OrderStatus.CANCELLED, OrderStatus.REJECTED))) {
+            throw new InvalidRequestException("Item is already in the cart / order");
+        }
+    }
+
     private void validateMerchExists(Long merchId) {
         if (!merchRepository.existsById(merchId)) {
             throw new MerchNotFoundException("Merch not found with ID: " + merchId);

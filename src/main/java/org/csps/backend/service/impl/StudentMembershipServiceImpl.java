@@ -100,6 +100,27 @@ public class StudentMembershipServiceImpl implements StudentMembershipService {
         return studentMembershipMapper.toResponseDTO(saved);
     }
 
+    @Override
+    @Transactional
+    public StudentMembershipResponseDTO ensureMembershipForCurrentAcademicYear(String studentId) {
+        if (studentId == null || studentId.isBlank()) {
+            throw new InvalidRequestException("Student ID is required");
+        }
+
+        Optional<StudentMembership> existingMembership = studentMembershipRepository
+                .findByStudentStudentIdAndYearStartAndYearEnd(studentId, currentYearStart, currentYearEnd);
+        if (existingMembership.isPresent()) {
+            return studentMembershipMapper.toResponseDTO(existingMembership.get());
+        }
+
+        StudentMembershipRequestDTO requestDTO = StudentMembershipRequestDTO.builder()
+                .studentId(studentId)
+                .yearStart(currentYearStart)
+                .yearEnd(currentYearEnd)
+                .build();
+        return createStudentMembership(requestDTO);
+    }
+
     /**
      * Retrieves all student memberships.
      *

@@ -4,6 +4,7 @@ import java.util.List;
 
 import org.csps.backend.domain.dtos.request.MerchVariantItemRequestDTO;
 import org.csps.backend.domain.dtos.response.MerchVariantItemResponseDTO;
+import org.csps.backend.domain.dtos.response.TicketFreebieConfigResponseDTO;
 import org.csps.backend.domain.enums.ClothingSizing;
 
 public interface MerchVariantItemService {
@@ -48,4 +49,9 @@ public interface MerchVariantItemService {
      * Get item by ID.
      */
     MerchVariantItemResponseDTO getItemById(Long merchVariantItemId);
+
+    /**
+     * Get all freebie configs available for a merch variant item.
+     */
+    List<TicketFreebieConfigResponseDTO> getFreebiesByMerchVariantItemId(Long merchVariantItemId);
 }

@@ -72,6 +72,7 @@ public class AdminController {
     }
 
     @PostMapping("/grant-access")
+    @PreAuthorize("hasRole('ADMIN_EXECUTIVE')")
     @Auditable(action = AuditAction.CREATE, resourceType = "Admin")
     public ResponseEntity<GlobalResponseBuilder<AdminResponseDTO>> grantAdminAccess(
             @RequestParam String studentId,

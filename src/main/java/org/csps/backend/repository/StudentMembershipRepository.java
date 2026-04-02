@@ -1,5 +1,6 @@
 package org.csps.backend.repository;
 
+import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -25,6 +26,8 @@ public interface StudentMembershipRepository extends JpaRepository<StudentMember
     
     @EntityGraph(attributePaths = {"student", "student.userAccount", "student.userAccount.userProfile"}, type = EntityGraph.EntityGraphType.FETCH)
     Optional<StudentMembership> findByStudentStudentIdAndYearStartAndYearEnd(String studentId, int yearStart, int yearEnd);
+
+    List<StudentMembership> findByYearStartAndYearEnd(int yearStart, int yearEnd);
     
     /* eager load student and related user profile for dashboard use */
     @EntityGraph(attributePaths = {"student", "student.userAccount", "student.userAccount.userProfile"}, type = EntityGraph.EntityGraphType.FETCH)

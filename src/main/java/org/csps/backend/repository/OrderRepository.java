@@ -17,6 +17,10 @@ import org.springframework.stereotype.Repository;
 
 @Repository
 public interface OrderRepository extends JpaRepository<Order, Long>, JpaSpecificationExecutor<Order> {
+
+    @Override
+    @EntityGraph(value = "Order.withItemsAndDetails", type = EntityGraph.EntityGraphType.FETCH)
+    List<Order> findAll();
     
     @Query("SELECT DISTINCT o FROM Order o LEFT JOIN FETCH o.orderItems oi LEFT JOIN FETCH oi.merchVariantItem mvi LEFT JOIN FETCH mvi.merchVariant mv LEFT JOIN FETCH mv.merch LEFT JOIN FETCH o.student s LEFT JOIN FETCH s.userAccount ua LEFT JOIN FETCH ua.userProfile WHERE o.student.studentId = :studentId")
     List<Order> findByStudentId(String studentId);
@@ -27,6 +31,9 @@ public interface OrderRepository extends JpaRepository<Order, Long>, JpaSpecific
 
     @EntityGraph(value = "Order.withItemsAndDetails", type = EntityGraph.EntityGraphType.FETCH)
     Optional<Order> findByOrderIdAndStudentStudentId(Long orderId, String studentId);
+
+    @EntityGraph(value = "Order.withItemsAndDetails", type = EntityGraph.EntityGraphType.FETCH)
+    Optional<Order> findByOrderId(Long orderId);
 
     @EntityGraph(value = "Order.withItemsAndDetails", type = EntityGraph.EntityGraphType.FETCH)
     Page<Order> findAllByOrderByOrderDateDesc(Pageable pageable);
@@ -43,9 +50,18 @@ public interface OrderRepository extends JpaRepository<Order, Long>, JpaSpecific
     
     @EntityGraph(attributePaths = {"student", "student.userAccount", "student.userAccount.userProfile"}, type = EntityGraph.EntityGraphType.FETCH)
     List<Order> findByOrderDateBetweenAndOrderStatus(LocalDateTime start, LocalDateTime end, OrderStatus status);
+
+    @EntityGraph(value = "Order.withItemsAndDetails", type = EntityGraph.EntityGraphType.FETCH)
+    List<Order> findByOrderDateBetweenAndOrderStatusIn(
+            LocalDateTime start,
+            LocalDateTime end,
+            List<OrderStatus> statuses);
     
     @EntityGraph(attributePaths = {"student", "student.userAccount", "student.userAccount.userProfile"}, type = EntityGraph.EntityGraphType.FETCH)
     List<Order> findByOrderStatus(OrderStatus status);
+
+    @EntityGraph(value = "Order.withItemsAndDetails", type = EntityGraph.EntityGraphType.FETCH)
+    List<Order> findByOrderStatusIn(List<OrderStatus> statuses);
 }
 
     

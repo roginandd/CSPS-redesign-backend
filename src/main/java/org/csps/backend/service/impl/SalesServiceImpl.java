@@ -12,17 +12,17 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import org.csps.backend.domain.dtos.request.OrderSearchDTO;
-import org.csps.backend.domain.dtos.request.StudentMembershipRequestDTO;
 import org.csps.backend.domain.dtos.response.sales.ChartPointDTO;
 import org.csps.backend.domain.dtos.response.sales.SalesStatsDTO;
 import org.csps.backend.domain.dtos.response.sales.TransactionDTO;
 import org.csps.backend.domain.entities.Order;
 import org.csps.backend.domain.entities.OrderItem;
+import org.csps.backend.domain.entities.StudentMembership;
 import org.csps.backend.domain.enums.MerchType;
 import org.csps.backend.domain.enums.OrderStatus;
 import org.csps.backend.domain.enums.SalesPeriod;
-import org.csps.backend.exception.InvalidRequestException;
 import org.csps.backend.exception.InvalidOrderStatusTransitionException;
+import org.csps.backend.exception.InvalidRequestException;
 import org.csps.backend.repository.OrderItemRepository;
 import org.csps.backend.repository.OrderRepository;
 import org.csps.backend.repository.StudentMembershipRepository;
@@ -44,6 +44,10 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class SalesServiceImpl implements SalesService {
 
+    private static final BigDecimal MEMBERSHIP_REVENUE_PER_MEMBER = BigDecimal.valueOf(100);
+    private static final List<OrderStatus> FINANCE_REVENUE_STATUSES =
+            List.of(OrderStatus.TO_BE_CLAIMED, OrderStatus.CLAIMED);
+
     private final OrderRepository orderRepository;
     private final OrderItemRepository orderItemRepository;
     private final OrderLifecycleService orderLifecycleService;
@@ -57,15 +61,16 @@ public class SalesServiceImpl implements SalesService {
     @Value("${csps.currentAcademicYear.end}")
     private int currentYearEnd;
 
-
     // Deployment date - set to today (February 8, 2026) as dummy data
     private static final LocalDate DEPLOYMENT_DATE = LocalDate.of(2026, 2, 25);
 
     @Override
     public SalesStatsDTO getSalesStats(SalesPeriod period) {
-        List<Order> claimedOrders = orderRepository.findByOrderStatus(OrderStatus.CLAIMED);
+        List<Order> financeOrders = orderRepository.findByOrderStatusIn(FINANCE_REVENUE_STATUSES);
+        List<StudentMembership> currentYearMemberships =
+                studentMembershipRepository.findByYearStartAndYearEnd(currentYearStart, currentYearEnd);
 
-        List<ChartPointDTO> chartData = generateChartData(claimedOrders, period);
+        List<ChartPointDTO> chartData = generateChartData(financeOrders, currentYearMemberships, period);
 
         // Calculate total sales from chart data (sum of all chart values)
         BigDecimal totalSales = chartData.stream()
@@ -114,25 +119,19 @@ public class SalesServiceImpl implements SalesService {
         }
 
         if (containsMembershipItem(order.getOrderItems())) {
-            StudentMembershipRequestDTO membershipRequest = StudentMembershipRequestDTO.builder()
-                    .studentId(order.getStudent().getStudentId())
-                    .yearStart(currentYearStart)
-                    .yearEnd(currentYearEnd)
-                    .build();
-
-            studentMembershipService.createStudentMembership(membershipRequest);
+            studentMembershipService.ensureMembershipForCurrentAcademicYear(order.getStudent().getStudentId());
         }
 
         for (OrderItem item : order.getOrderItems()) {
-            item.setOrderStatus(OrderStatus.TO_BE_CLAIMED);
+            item.setOrderStatus(resolveApprovedItemStatus(item));
             item.setUpdatedAt(LocalDateTime.now());
             orderItemRepository.save(item);
         }
 
-        order.setOrderStatus(OrderStatus.TO_BE_CLAIMED);
+        order.setOrderStatus(resolveOrderStatusAfterApproval(order));
         order.setUpdatedAt(LocalDateTime.now());
         Order savedOrder = orderRepository.save(order);
-        sendReadyToClaimNotifications(savedOrder.getOrderId());
+        sendApprovedItemNotifications(savedOrder.getOrderId());
 
         return mapToTransactionDTO(savedOrder, isActiveMember(savedOrder.getStudent().getStudentId()));
     }
@@ -189,56 +188,71 @@ public class SalesServiceImpl implements SalesService {
                 && item.getMerchVariantItem().getMerchVariant().getMerch().getMerchType() == MerchType.MEMBERSHIP);
     }
 
-    private void sendReadyToClaimNotifications(Long orderId) {
+    private void sendApprovedItemNotifications(Long orderId) {
         List<OrderItem> orderItems = orderItemRepository.findByOrderOrderId(orderId);
         for (OrderItem orderItem : orderItems) {
-            var notificationData = orderNotificationService.extractNotificationData(orderItem, OrderStatus.TO_BE_CLAIMED);
+            var notificationData = orderNotificationService.extractNotificationData(orderItem, orderItem.getOrderStatus());
             if (notificationData != null) {
                 orderNotificationService.sendOrderStatusEmail(notificationData);
             }
         }
     }
 
+    private OrderStatus resolveApprovedItemStatus(OrderItem item) {
+        if (item != null
+                && item.getMerchVariantItem() != null
+                && item.getMerchVariantItem().getMerchVariant() != null
+                && item.getMerchVariantItem().getMerchVariant().getMerch() != null
+                && item.getMerchVariantItem().getMerchVariant().getMerch().getMerchType() == MerchType.MEMBERSHIP) {
+            return OrderStatus.CLAIMED;
+        }
+
+        return OrderStatus.TO_BE_CLAIMED;
+    }
+
+    private OrderStatus resolveOrderStatusAfterApproval(Order order) {
+        if (order == null || order.getOrderItems() == null || order.getOrderItems().isEmpty()) {
+            return OrderStatus.PENDING;
+        }
+
+        boolean allClaimed = order.getOrderItems().stream().allMatch(item -> item.getOrderStatus() == OrderStatus.CLAIMED);
+        return allClaimed ? OrderStatus.CLAIMED : OrderStatus.TO_BE_CLAIMED;
+    }
+
     private boolean isActiveMember(String studentId) {
         return studentMembershipRepository.hasActiveMembership(studentId);
     }
 
-    private List<ChartPointDTO> generateChartData(List<Order> orders, SalesPeriod period) {
+    private List<ChartPointDTO> generateChartData(
+            List<Order> orders,
+            List<StudentMembership> memberships,
+            SalesPeriod period) {
         Map<String, BigDecimal> groupedData = new LinkedHashMap<>();
 
         orders.forEach(order -> {
-            if (order.getOrderDate() == null || order.getTotalPrice() == null) {
+            if (order.getOrderDate() == null) {
                 return;
             }
 
             LocalDate orderDate = order.getOrderDate().toLocalDate();
-            String key;
-
-            switch (period) {
-                case DAILY:
-                    key = orderDate.toString();
-                    break;
-                case WEEKLY:
-                    // Calculate weeks since deployment date
-                    long daysSinceDeployment = java.time.temporal.ChronoUnit.DAYS.between(DEPLOYMENT_DATE, orderDate);
-                    int weekSinceDeployment = (int) Math.ceil((daysSinceDeployment + 1.0) / 7.0);
-                    key = "Week " + Math.max(1, weekSinceDeployment);
-                    break;
-                case MONTHLY:
-                    key = orderDate.getMonth().toString() + " " + orderDate.getYear();
-                    break;
-                case YEARLY:
-                    key = String.valueOf(orderDate.getYear());
-                    break;
-                case ALL_TIME:
-                    key = "All Time";
-                    break;
-                default:
-                    key = orderDate.toString();
+            BigDecimal merchRevenue = calculateFinanceMerchRevenue(order);
+            if (merchRevenue.signum() == 0) {
+                return;
             }
 
-            groupedData.put(key, groupedData.getOrDefault(key, BigDecimal.ZERO)
-                    .add(BigDecimal.valueOf(order.getTotalPrice())));
+            String key = resolveChartKey(orderDate, period);
+            groupedData.put(key, groupedData.getOrDefault(key, BigDecimal.ZERO).add(merchRevenue));
+        });
+
+        memberships.forEach(membership -> {
+            if (membership.getDateJoined() == null) {
+                return;
+            }
+
+            String key = resolveChartKey(membership.getDateJoined().toLocalDate(), period);
+            groupedData.put(
+                    key,
+                    groupedData.getOrDefault(key, BigDecimal.ZERO).add(MEMBERSHIP_REVENUE_PER_MEMBER));
         });
 
         return groupedData.entrySet().stream()
@@ -247,6 +261,55 @@ public class SalesServiceImpl implements SalesService {
                         .value(entry.getValue())
                         .build())
                 .collect(Collectors.toList());
+    }
+
+    private BigDecimal calculateFinanceMerchRevenue(Order order) {
+        if (order == null || order.getOrderItems() == null || order.getOrderItems().isEmpty()) {
+            return BigDecimal.ZERO;
+        }
+
+        return order.getOrderItems().stream()
+                .filter(this::isFinanceRevenueItem)
+                .filter(item -> !isMembershipItem(item))
+                .map(this::calculateLineTotal)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
+    private boolean isFinanceRevenueItem(OrderItem item) {
+        return item != null
+                && item.getOrderStatus() != null
+                && FINANCE_REVENUE_STATUSES.contains(item.getOrderStatus());
+    }
+
+    private boolean isMembershipItem(OrderItem item) {
+        return item != null
+                && item.getMerchVariantItem() != null
+                && item.getMerchVariantItem().getMerchVariant() != null
+                && item.getMerchVariantItem().getMerchVariant().getMerch() != null
+                && item.getMerchVariantItem().getMerchVariant().getMerch().getMerchType() == MerchType.MEMBERSHIP;
+    }
+
+    private BigDecimal calculateLineTotal(OrderItem item) {
+        if (item == null || item.getPriceAtPurchase() == null || item.getQuantity() == null) {
+            return BigDecimal.ZERO;
+        }
+
+        return BigDecimal.valueOf(item.getPriceAtPurchase())
+                .multiply(BigDecimal.valueOf(item.getQuantity().longValue()));
+    }
+
+    private String resolveChartKey(LocalDate date, SalesPeriod period) {
+        return switch (period) {
+            case DAILY -> date.toString();
+            case WEEKLY -> {
+                long daysSinceDeployment = java.time.temporal.ChronoUnit.DAYS.between(DEPLOYMENT_DATE, date);
+                int weekSinceDeployment = (int) Math.ceil((daysSinceDeployment + 1.0) / 7.0);
+                yield "Week " + Math.max(1, weekSinceDeployment);
+            }
+            case MONTHLY -> date.getMonth().toString() + " " + date.getYear();
+            case YEARLY -> String.valueOf(date.getYear());
+            case ALL_TIME -> "All Time";
+        };
     }
 
     private OrderSearchDTO normalizeAndValidateSearch(OrderSearchDTO searchDTO) {

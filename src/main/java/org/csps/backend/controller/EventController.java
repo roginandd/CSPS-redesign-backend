@@ -12,11 +12,13 @@ import org.csps.backend.domain.enums.AuditAction;
 import org.csps.backend.service.EventService;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -49,6 +51,19 @@ public class EventController {
         String message = "Events retrieved successfully";
         return GlobalResponseBuilder.buildResponse(message, events, HttpStatus.OK);
     } 
+
+    @GetMapping("/search")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('STUDENT')")
+    public ResponseEntity<GlobalResponseBuilder<Page<EventResponseDTO>>> searchEvents(
+        @RequestParam String query,
+        @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+        @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
+        @PageableDefault(size = 10, sort = "eventDate", direction = Sort.Direction.ASC) Pageable pageable
+    ) {
+        Page<EventResponseDTO> results = eventService.searchEvent(query, startDate, endDate, pageable);
+        String message = "Events retrieved successfully";
+        return GlobalResponseBuilder.buildResponse(message, results, HttpStatus.OK);
+    }
 
     @GetMapping("/{id}")
     @PreAuthorize("hasRole('ADMIN') or hasRole('STUDENT')")

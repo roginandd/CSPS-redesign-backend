@@ -6,6 +6,7 @@ import org.csps.backend.exception.CartNotFoundException;
 import org.csps.backend.exception.InvalidRequestException;
 import org.csps.backend.mapper.CartMapper;
 import org.csps.backend.repository.CartRepository;
+import org.csps.backend.service.CartItemService;
 import org.csps.backend.service.CartService;
 import org.springframework.stereotype.Service;
 
@@ -18,6 +19,7 @@ public class CartServiceImpl implements CartService {
 
     private final CartRepository cartRepository;
     private final CartMapper cartMapper;
+    private final CartItemService cartItemService;
 
     @Override
     public CartResponseDTO getCartByStudentId(String studentId) {
@@ -28,7 +30,9 @@ public class CartServiceImpl implements CartService {
         Cart cart = cartRepository.findByIdWithItems(studentId)
                 .orElseThrow(() -> new CartNotFoundException("Cart not found for student: " + studentId));
 
-        return cartMapper.toResponseDTO(cart);
+        CartResponseDTO response = cartMapper.toResponseDTO(cart);
+        response.setCartItemResponseDTOs(cartItemService.getCartItems(studentId));
+        return response;
     }
 
     @Override

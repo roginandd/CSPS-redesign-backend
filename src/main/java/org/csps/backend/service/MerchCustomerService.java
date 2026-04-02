@@ -24,7 +24,7 @@ public interface MerchCustomerService {
      * @param pageable pagination details
      * @return paginated list of MerchCustomerResponseDTO
      */
-    Page<MerchCustomerResponseDTO> getCustomersByMerchId(Long merchId, Pageable pageable);
+    Page<MerchCustomerResponseDTO> getCustomersByMerchId(Long merchId, Pageable pageable, boolean includeFreebies);
 
     /**
      * Get a paginated list of customers who purchased a specific merch,
@@ -35,7 +35,7 @@ public interface MerchCustomerService {
      * @param pageable pagination details
      * @return paginated list of MerchCustomerResponseDTO matching the status
      */
-    Page<MerchCustomerResponseDTO> getCustomersByMerchIdAndStatus(Long merchId, OrderStatus status, Pageable pageable);
+    Page<MerchCustomerResponseDTO> getCustomersByMerchIdAndStatus(Long merchId, OrderStatus status, Pageable pageable, boolean includeFreebies);
 
     /**
      * Get the total count of customers (order items) for a specific merch.
@@ -44,7 +44,7 @@ public interface MerchCustomerService {
      * @param merchId the merch ID to count for
      * @return total number of order items for this merch
      */
-    long getCustomerCountByMerchId(Long merchId);
+    long getCustomerCountByMerchId(Long merchId, boolean includeFreebies);
 
     /**
      * Batch-create orders for a list of students who already paid for a specific merch.
@@ -73,5 +73,5 @@ public interface MerchCustomerService {
      * @param merchId the merch ID to look up customers for
      * @return complete list of MerchCustomerResponseDTO
      */
-    List<MerchCustomerResponseDTO> getAllCustomersByMerchId(Long merchId);
+    List<MerchCustomerResponseDTO> getAllCustomersByMerchId(Long merchId, boolean includeFreebies);
 }

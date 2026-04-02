@@ -6,6 +6,7 @@ import org.csps.backend.annotation.Auditable;
 import org.csps.backend.domain.dtos.request.MerchVariantItemRequestDTO;
 import org.csps.backend.domain.dtos.response.GlobalResponseBuilder;
 import org.csps.backend.domain.dtos.response.MerchVariantItemResponseDTO;
+import org.csps.backend.domain.dtos.response.TicketFreebieConfigResponseDTO;
 import org.csps.backend.domain.enums.AuditAction;
 import org.csps.backend.domain.enums.ClothingSizing;
 import org.csps.backend.service.MerchVariantItemService;
@@ -69,6 +70,17 @@ public class MerchVariantItemController {
             @PathVariable Long id) {
         MerchVariantItemResponseDTO responseDTO = merchVariantItemService.getItemById(id);
         return GlobalResponseBuilder.buildResponse("Merch variant item retrieved successfully", responseDTO, HttpStatus.OK);
+    }
+
+    /**
+     * Get all freebies configured for the ticket owning this merch variant item.
+     */
+    @GetMapping("/{id}/freebies")
+    @PreAuthorize("hasRole('STUDENT') or hasRole('ADMIN')")
+    public ResponseEntity<GlobalResponseBuilder<List<TicketFreebieConfigResponseDTO>>> getFreebiesByMerchVariantItemId(
+            @PathVariable Long id) {
+        List<TicketFreebieConfigResponseDTO> responseDTOs = merchVariantItemService.getFreebiesByMerchVariantItemId(id);
+        return GlobalResponseBuilder.buildResponse("Merch variant item freebies retrieved successfully", responseDTOs, HttpStatus.OK);
     }
 
     /**

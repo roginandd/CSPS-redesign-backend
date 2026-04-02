@@ -1,4 +1,4 @@
- package org.csps.backend.service.impl;
+package org.csps.backend.service.impl;
 
 import java.io.IOException;
 import java.util.List;
@@ -26,24 +26,19 @@ import org.csps.backend.service.MerchVariantItemService;
 import org.csps.backend.service.MerchVariantService;
 import org.csps.backend.service.S3Service;
 import org.csps.backend.service.StudentService;
-import org.springframework.cache.annotation.CacheEvict;
-import org.springframework.cache.annotation.Cacheable;
+import org.csps.backend.service.TicketFreebieConfigService;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
-import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 
-/**
- * Service implementation for Merch (base merchandise).
- * Manages merch creation, retrieval, and updates.
- * Delegates variant operations to MerchVariantService.
- * Delegates item-level (size/stock) operations to MerchVariantItemService.
- */
 @Service
 @RequiredArgsConstructor
 public class MerchServiceImpl implements MerchService {
+
+    private static final String ITEM_ALREADY_IN_CART_OR_ORDER = "Item is already in the cart / order";
 
     private final MerchRepository merchRepository;
     private final MerchMapper merchMapper;
@@ -54,7 +49,7 @@ public class MerchServiceImpl implements MerchService {
     private final CartItemRepository cartItemRepository;
     private final OrderItemRepository orderItemRepository;
     private final StudentService studentService;
-
+    private final TicketFreebieConfigService ticketFreebieConfigService;
 
     @Override
     @Transactional
@@ -68,7 +63,6 @@ public class MerchServiceImpl implements MerchService {
         String description = request.getDescription();
         Double basePrice = request.getBasePrice();
 
-        // Validate merch fields
         if (merchName == null || merchName.trim().isEmpty()) {
             throw new InvalidRequestException("Merchandise name is required");
         }
@@ -78,76 +72,48 @@ public class MerchServiceImpl implements MerchService {
         if (description == null || description.trim().isEmpty()) {
             throw new InvalidRequestException("Description is required");
         }
-
-        // Check duplicate name
+        if (basePrice == null || basePrice < 0) {
+            throw new InvalidRequestException("Base price is required and must be non-negative");
+        }
         if (merchRepository.existsByMerchName(merchName)) {
             throw new MerchAlreadyExistException("Merch name already exists");
         }
 
-        // PHASE 1: Create base Merch entity
         Merch merch = Merch.builder()
                 .merchName(merchName)
                 .description(description)
                 .merchType(merchType)
                 .basePrice(basePrice)
                 .s3ImageKey("placeholder")
+                .hasFreebie(Boolean.TRUE.equals(request.getHasFreebie()))
                 .build();
 
         Merch savedMerch = merchRepository.save(merch);
 
-        // Upload merch image if provided
+        validateAndPersistVariants(savedMerch.getMerchId(), merchType, request.getMerchVariantRequestDto());
+        ticketFreebieConfigService.syncConfigsForMerch(savedMerch, request.getHasFreebie(), request.getFreebieConfigs());
+
         if (request.getMerchImage() != null && !request.getMerchImage().isEmpty()) {
             String s3ImageKey = s3Service.uploadFile(request.getMerchImage(), savedMerch.getMerchId(), "merch");
             savedMerch.setS3ImageKey(s3ImageKey);
             savedMerch = merchRepository.save(savedMerch);
         }
-    
-        // PHASE 2 & 3: Process variants and items in batch
-        List<MerchVariantRequestDTO> variants = request.getMerchVariantRequestDto();
-        if (variants == null || variants.isEmpty()) {
-            throw new InvalidRequestException("At least one variant is required");
-        }
 
-        for (MerchVariantRequestDTO variantDto : variants) {
-            if(merchType == MerchType.CLOTHING) {
-                // For clothing, either color or design must be provided
-                if ((variantDto.getColor() == null || variantDto.getColor().trim().isEmpty())
-                    && (variantDto.getDesign() == null || variantDto.getDesign().trim().isEmpty())) {
-                    throw new InvalidRequestException("Either color or design is required for clothing variants");
-                }
-            } else {
-                // For non-clothing, design is required
-                if (variantDto.getDesign() == null || variantDto.getDesign().trim().isEmpty()) {
-                    throw new InvalidRequestException("Design is required for non-clothing variants");
-                }
-            }
-
-            // Validate items
-            List<MerchVariantItemRequestDTO> items = variantDto.getVariantItems();
-            if (items == null || items.isEmpty()) {
-                throw new InvalidRequestException("At least one item (size/price/stock) is required for each variant");
-            }
-
-            // Create variant with items passed directly (all saved in batch within service)
-            merchVariantService.addVariantToMerch(savedMerch.getMerchId(), variantDto);
-        }
-
-        // Reload merch with all variants and items, then build complete response
         Merch finalMerch = merchRepository.findById(savedMerch.getMerchId())
                 .orElseThrow(() -> new MerchNotFoundException("Merch not found"));
-
-        return merchMapper.toDetailedResponseDTO(finalMerch);
+        return enrichDetailedResponse(merchMapper.toDetailedResponseDTO(finalMerch));
     }
 
     @Override
+    @Transactional(readOnly = true)
     public List<MerchDetailedResponseDTO> getAllMerch() {
         List<MerchDetailedResponseDTO> allMerch = merchRepository.findAll().stream()
                 .map(merchMapper::toDetailedResponseDTO)
+                .map(this::enrichDetailedResponse)
                 .collect(Collectors.toList());
 
         String studentId = studentService.getCurrentStudentId();
         if (studentId != null) {
-            // combine membership checks: active membership, in cart, or in pending order
             boolean shouldExcludeMembership = studentMembershipRepository.hasActiveMembership(studentId)
                     || cartItemRepository.existsByStudentIdAndMerchType(studentId, MerchType.MEMBERSHIP)
                     || orderItemRepository.existsByStudentIdAndMerchTypeAndStatus(studentId, MerchType.MEMBERSHIP, OrderStatus.PENDING);
@@ -160,13 +126,15 @@ public class MerchServiceImpl implements MerchService {
     }
 
     @Override
+    @Transactional(readOnly = true)
     public List<MerchSummaryResponseDTO> getAllMerchSummaries() {
-        List<MerchSummaryResponseDTO> summaries = merchRepository.findAllSummaries();
+        List<MerchSummaryResponseDTO> summaries = merchRepository.findAllSummaries().stream()
+            .map(this::enrichSummaryResponse)
+            .toList();
+
         String studentId = studentService.getCurrentStudentId();
-        
         if (studentId != null) {
-            // combine membership checks: active membership, in cart, or in pending order
-            boolean shouldExcludeMembership = studentMembershipRepository.hasActiveMembership(studentId) 
+            boolean shouldExcludeMembership = studentMembershipRepository.hasActiveMembership(studentId)
                     || cartItemRepository.existsByStudentIdAndMerchType(studentId, MerchType.MEMBERSHIP)
                     || orderItemRepository.existsByStudentIdAndMerchTypeAndStatus(studentId, MerchType.MEMBERSHIP, OrderStatus.PENDING);
 
@@ -180,13 +148,15 @@ public class MerchServiceImpl implements MerchService {
     }
 
     @Override
+    @Transactional(readOnly = true)
     public MerchDetailedResponseDTO getMerchById(Long id) {
         Merch merch = merchRepository.findById(id)
                 .orElseThrow(() -> new MerchNotFoundException("Merch not found with id: " + id));
-        return merchMapper.toDetailedResponseDTO(merch);
+        return enrichDetailedResponse(merchMapper.toDetailedResponseDTO(merch));
     }
 
     @Override
+    @Transactional(readOnly = true)
     public List<MerchSummaryResponseDTO> getMerchByType(MerchType merchType) {
         if (merchType == null) {
             throw new InvalidRequestException("Merch type is required");
@@ -194,100 +164,95 @@ public class MerchServiceImpl implements MerchService {
 
         String studentId = studentService.getCurrentStudentId();
         if (studentId != null && merchType == MerchType.MEMBERSHIP) {
-            // combine membership checks: active membership, in cart, or in pending order
             boolean shouldExcludeMembership = studentMembershipRepository.hasActiveMembership(studentId)
                     || cartItemRepository.existsByStudentIdAndMerchType(studentId, MerchType.MEMBERSHIP)
                     || orderItemRepository.existsByStudentIdAndMerchTypeAndStatus(studentId, MerchType.MEMBERSHIP, OrderStatus.PENDING);
-            
             if (shouldExcludeMembership) {
                 return List.of();
             }
         }
 
-        return merchRepository.findAllSummaryByType(merchType);
+        return merchRepository.findAllSummaryByType(merchType).stream()
+            .map(this::enrichSummaryResponse)
+            .toList();
     }
 
     @Override
     @Transactional
-    public MerchDetailedResponseDTO putMerch(Long merchId, MerchUpdateRequestDTO merchUpdateRequestDTO) throws IOException {
-        // Find merch by ID
+    public MerchDetailedResponseDTO putMerch(Long merchId, MerchUpdateRequestDTO request) throws IOException {
         Merch foundMerch = merchRepository.findById(merchId)
                 .orElseThrow(() -> new MerchNotFoundException("Merch not found with id: " + merchId));
 
-        // Validate required fields
-        if (merchUpdateRequestDTO.getMerchName() == null || merchUpdateRequestDTO.getMerchName().trim().isEmpty()
-            || merchUpdateRequestDTO.getDescription() == null || merchUpdateRequestDTO.getDescription().trim().isEmpty()
-            || merchUpdateRequestDTO.getMerchType() == null) {
-            throw new InvalidRequestException("Invalid credential");
+        if (request.getMerchName() == null || request.getMerchName().trim().isEmpty()
+            || request.getDescription() == null || request.getDescription().trim().isEmpty()
+            || request.getMerchType() == null) {
+            throw new InvalidRequestException("Merch name, description, and type are required");
         }
 
-        // Check for duplicate name (excluding current merch)
-        if (!foundMerch.getMerchName().equals(merchUpdateRequestDTO.getMerchName())
-            && merchRepository.existsByMerchName(merchUpdateRequestDTO.getMerchName())) {
+        if (!foundMerch.getMerchName().equals(request.getMerchName())
+            && merchRepository.existsByMerchName(request.getMerchName())) {
             throw new MerchAlreadyExistException("Merch name already exists");
         }
 
-        // Update fields
-        foundMerch.setMerchName(merchUpdateRequestDTO.getMerchName());
-        foundMerch.setDescription(merchUpdateRequestDTO.getDescription());
-        foundMerch.setMerchType(merchUpdateRequestDTO.getMerchType());
+        foundMerch.setMerchName(request.getMerchName().trim());
+        foundMerch.setDescription(request.getDescription().trim());
+        foundMerch.setMerchType(request.getMerchType());
+        foundMerch.setHasFreebie(Boolean.TRUE.equals(request.getHasFreebie()));
 
         Merch updated = merchRepository.save(foundMerch);
-        return merchMapper.toDetailedResponseDTO(updated);
+        ticketFreebieConfigService.syncConfigsForMerch(updated, request.getHasFreebie(), request.getFreebieConfigs());
+        return enrichDetailedResponse(merchMapper.toDetailedResponseDTO(updated));
     }
 
     @Override
     @Transactional
-    public MerchDetailedResponseDTO patchMerch(Long merchId, MerchUpdateRequestDTO merchUpdateRequestDTO) throws IOException {
-        // Find merch by ID
+    public MerchDetailedResponseDTO patchMerch(Long merchId, MerchUpdateRequestDTO request) throws IOException {
         Merch foundMerch = merchRepository.findById(merchId)
                 .orElseThrow(() -> new MerchNotFoundException("Merch not found with id: " + merchId));
 
-        // Partial updates
-        if (merchUpdateRequestDTO.getMerchName() != null && !merchUpdateRequestDTO.getMerchName().trim().isEmpty()) {
-            if (!foundMerch.getMerchName().equals(merchUpdateRequestDTO.getMerchName())
-                && merchRepository.existsByMerchName(merchUpdateRequestDTO.getMerchName())) {
+        if (request.getMerchName() != null && !request.getMerchName().trim().isEmpty()) {
+            if (!foundMerch.getMerchName().equals(request.getMerchName())
+                && merchRepository.existsByMerchName(request.getMerchName())) {
                 throw new MerchAlreadyExistException("Merch name already exists");
             }
-            foundMerch.setMerchName(merchUpdateRequestDTO.getMerchName());
+            foundMerch.setMerchName(request.getMerchName().trim());
         }
-        if (merchUpdateRequestDTO.getDescription() != null && !merchUpdateRequestDTO.getDescription().trim().isEmpty()) {
-            foundMerch.setDescription(merchUpdateRequestDTO.getDescription());
+        if (request.getDescription() != null && !request.getDescription().trim().isEmpty()) {
+            foundMerch.setDescription(request.getDescription().trim());
         }
-        if (merchUpdateRequestDTO.getMerchType() != null) {
-            foundMerch.setMerchType(merchUpdateRequestDTO.getMerchType());
+        if (request.getMerchType() != null) {
+            foundMerch.setMerchType(request.getMerchType());
+        }
+        if (request.getHasFreebie() != null) {
+            foundMerch.setHasFreebie(request.getHasFreebie());
         }
 
         Merch updated = merchRepository.save(foundMerch);
-        return merchMapper.toDetailedResponseDTO(updated);    
+        ticketFreebieConfigService.syncConfigsForMerch(updated, updated.getHasFreebie(), request.getFreebieConfigs());
+        return enrichDetailedResponse(merchMapper.toDetailedResponseDTO(updated));
     }
 
     @Override
     @Transactional
     public void deleteMerch(Long merchId) {
-        // Find merch by ID
         Merch merch = merchRepository.findById(merchId)
                 .orElseThrow(() -> new MerchNotFoundException("Merch not found with id: " + merchId));
-
-        // soft delete: mark as inactive instead of hard delete
         merch.setIsActive(false);
         merchRepository.save(merch);
     }
 
     @Override
+    @Transactional(readOnly = true)
     public Page<MerchDetailedResponseDTO> getArchivedMerch(Pageable pageable) {
-        /* retrieve archived merch paginated with eager loading of variants */
         Page<Merch> archivedMerch = merchRepository.findArchivedMerch(pageable);
-        return archivedMerch.map(merchMapper::toDetailedResponseDTO);
+        return archivedMerch.map(merchMapper::toDetailedResponseDTO).map(this::enrichDetailedResponse);
     }
 
     @Override
     @Transactional
     public MerchDetailedResponseDTO revertMerch(Long merchId) {
-        /* revert archived merch back to active status */
         Merch merch = merchRepository.findByIdAndIsInactive(merchId)
                 .orElseThrow(() -> new MerchNotFoundException("Archived merch not found with id: " + merchId));
-        
 
         if (merch.getIsActive()) {
             throw new InvalidRequestException("Merch with id " + merchId + " is already active");
@@ -295,6 +260,93 @@ public class MerchServiceImpl implements MerchService {
 
         merch.setIsActive(true);
         Merch reverted = merchRepository.save(merch);
-        return merchMapper.toDetailedResponseDTO(reverted);
+        return enrichDetailedResponse(merchMapper.toDetailedResponseDTO(reverted));
+    }
+
+    private void validateAndPersistVariants(Long merchId, MerchType merchType, List<MerchVariantRequestDTO> variants) throws IOException {
+        if (variants == null || variants.isEmpty()) {
+            throw new InvalidRequestException("At least one variant is required");
+        }
+
+        for (MerchVariantRequestDTO variantDto : variants) {
+            validateVariantRequest(merchType, variantDto);
+        }
+
+        for (MerchVariantRequestDTO variantDto : variants) {
+            merchVariantService.addVariantToMerch(merchId, variantDto);
+        }
+    }
+
+    private void validateVariantRequest(MerchType merchType, MerchVariantRequestDTO variantDto) {
+        if (variantDto == null) {
+            throw new InvalidRequestException("Variant request is required");
+        }
+
+        if (merchType == MerchType.CLOTHING) {
+            if (variantDto.getColor() == null || variantDto.getColor().trim().isEmpty()) {
+                throw new InvalidRequestException("Color is required for clothing variants");
+            }
+            if (variantDto.getDesign() != null && !variantDto.getDesign().trim().isEmpty()) {
+                throw new InvalidRequestException("Design is not allowed for clothing variants");
+            }
+        } else {
+            if (variantDto.getDesign() == null || variantDto.getDesign().trim().isEmpty()) {
+                throw new InvalidRequestException("Design is required for non-clothing variants");
+            }
+            if (variantDto.getColor() != null && !variantDto.getColor().trim().isEmpty()) {
+                throw new InvalidRequestException("Color is not allowed for non-clothing variants");
+            }
+        }
+
+        List<MerchVariantItemRequestDTO> items = variantDto.getVariantItems();
+        if (items == null || items.isEmpty()) {
+            throw new InvalidRequestException("At least one item (size/price/stock) is required for each variant");
+        }
+    }
+
+    private MerchDetailedResponseDTO enrichDetailedResponse(MerchDetailedResponseDTO response) {
+        response.setFreebieConfigs(ticketFreebieConfigService.getConfigsByTicketMerchId(response.getMerchId()));
+        enrichPurchaseState(response.getMerchId(), response.getMerchType(), response::setPurchaseBlocked, response::setPurchaseBlockMessage);
+        return response;
+    }
+
+    private MerchSummaryResponseDTO enrichSummaryResponse(MerchSummaryResponseDTO response) {
+        response.setFreebieConfigs(ticketFreebieConfigService.getConfigsByTicketMerchId(response.getMerchId()));
+        enrichPurchaseState(response.getMerchId(), response.getMerchType(), response::setPurchaseBlocked, response::setPurchaseBlockMessage);
+        return response;
+    }
+
+    private void enrichPurchaseState(
+            Long merchId,
+            MerchType merchType,
+            java.util.function.Consumer<Boolean> purchaseBlockedConsumer,
+            java.util.function.Consumer<String> purchaseBlockMessageConsumer) {
+        String studentId = studentService.getCurrentStudentId();
+        if (studentId == null || merchType == null) {
+            purchaseBlockedConsumer.accept(Boolean.FALSE);
+            purchaseBlockMessageConsumer.accept(null);
+            return;
+        }
+
+        boolean purchaseBlocked = false;
+        String purchaseBlockMessage = null;
+
+        if (merchType == MerchType.TICKET) {
+            purchaseBlocked = cartItemRepository.existsByStudentIdAndMerchId(studentId, merchId)
+                    || orderItemRepository.existsByStudentIdAndMerchIdAndOrderStatusNotIn(
+                            studentId,
+                            merchId,
+                            List.of(OrderStatus.CANCELLED, OrderStatus.REJECTED));
+            purchaseBlockMessage = purchaseBlocked ? ITEM_ALREADY_IN_CART_OR_ORDER : null;
+        } else if (merchType == MerchType.MEMBERSHIP) {
+            boolean hasMembershipConflict = studentMembershipRepository.hasActiveMembership(studentId)
+                    || cartItemRepository.existsByStudentIdAndMerchType(studentId, MerchType.MEMBERSHIP)
+                    || orderItemRepository.existsByStudentIdAndMerchTypeAndStatus(studentId, MerchType.MEMBERSHIP, OrderStatus.PENDING);
+            purchaseBlocked = hasMembershipConflict;
+            purchaseBlockMessage = hasMembershipConflict ? ITEM_ALREADY_IN_CART_OR_ORDER : null;
+        }
+
+        purchaseBlockedConsumer.accept(purchaseBlocked);
+        purchaseBlockMessageConsumer.accept(purchaseBlockMessage);
     }
 }

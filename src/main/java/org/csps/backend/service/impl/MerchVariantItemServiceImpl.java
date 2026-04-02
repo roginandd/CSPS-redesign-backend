@@ -5,6 +5,7 @@ import java.util.List;
 
 import org.csps.backend.domain.dtos.request.MerchVariantItemRequestDTO;
 import org.csps.backend.domain.dtos.response.MerchVariantItemResponseDTO;
+import org.csps.backend.domain.dtos.response.TicketFreebieConfigResponseDTO;
 import org.csps.backend.domain.entities.Merch;
 import org.csps.backend.domain.entities.MerchVariant;
 import org.csps.backend.domain.entities.MerchVariantItem;
@@ -13,9 +14,12 @@ import org.csps.backend.domain.enums.MerchType;
 import org.csps.backend.exception.InvalidRequestException;
 import org.csps.backend.exception.MerchVariantNotFoundException;
 import org.csps.backend.mapper.MerchVariantItemMapper;
+import org.csps.backend.repository.CartItemRepository;
 import org.csps.backend.repository.MerchVariantItemRepository;
 import org.csps.backend.repository.MerchVariantRepository;
+import org.csps.backend.repository.OrderItemRepository;
 import org.csps.backend.service.MerchVariantItemService;
+import org.csps.backend.service.TicketFreebieConfigService;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.stereotype.Service;
 
@@ -29,6 +33,9 @@ public class MerchVariantItemServiceImpl implements MerchVariantItemService {
     private final MerchVariantItemRepository itemRepository;
     private final MerchVariantRepository variantRepository;
     private final MerchVariantItemMapper itemMapper;
+    private final TicketFreebieConfigService ticketFreebieConfigService;
+    private final CartItemRepository cartItemRepository;
+    private final OrderItemRepository orderItemRepository;
 
     @Override
     @Transactional
@@ -135,6 +142,7 @@ public class MerchVariantItemServiceImpl implements MerchVariantItemService {
                 if (existingSizesSet.contains(dto.getSize())) {
                     throw new InvalidRequestException("Item with size " + dto.getSize() + " already exists for this variant");
                 }
+                existingSizesSet.add(dto.getSize());
             } else {
                 // For non-clothing (PIN, STICKER, KEYCHAIN, etc): size NOT allowed, must use design
                 if (dto.getSize() != null) {
@@ -223,10 +231,17 @@ public class MerchVariantItemServiceImpl implements MerchVariantItemService {
     @Override
     @Transactional
     public void deleteItem(Long merchVariantItemId) {
-        if (!itemRepository.existsById(merchVariantItemId)) {
-            throw new InvalidRequestException("MerchVariantItem not found with id: " + merchVariantItemId);
+        MerchVariantItem item = itemRepository.findById(merchVariantItemId)
+                .orElseThrow(() -> new InvalidRequestException("MerchVariantItem not found with id: " + merchVariantItemId));
+
+        if (cartItemRepository.existsByMerchVariantItemMerchVariantItemId(merchVariantItemId)) {
+            throw new InvalidRequestException("Cannot delete item that is referenced by cart items");
         }
-        itemRepository.deleteById(merchVariantItemId);
+        if (orderItemRepository.existsByMerchVariantItemMerchVariantItemId(merchVariantItemId)) {
+            throw new InvalidRequestException("Cannot delete item that is referenced by order items");
+        }
+
+        itemRepository.delete(item);
     }
 
     @Override
@@ -235,5 +250,10 @@ public class MerchVariantItemServiceImpl implements MerchVariantItemService {
                 .orElseThrow(() -> new InvalidRequestException("MerchVariantItem not found with id: " + merchVariantItemId));
 
         return itemMapper.toResponseDto(item);
+    }
+
+    @Override
+    public List<TicketFreebieConfigResponseDTO> getFreebiesByMerchVariantItemId(Long merchVariantItemId) {
+        return ticketFreebieConfigService.getConfigsByMerchVariantItemId(merchVariantItemId);
     }
 }

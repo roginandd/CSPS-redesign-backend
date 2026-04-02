@@ -7,7 +7,6 @@ import java.time.format.TextStyle;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.stream.Collectors;
 
 import org.csps.backend.domain.dtos.response.ChartDataDTO;
@@ -17,6 +16,9 @@ import org.csps.backend.domain.dtos.response.MembershipRatioDTO;
 import org.csps.backend.domain.dtos.response.OrderSummaryDTO;
 import org.csps.backend.domain.dtos.response.StudentMembershipDTO;
 import org.csps.backend.domain.entities.Order;
+import org.csps.backend.domain.entities.OrderItem;
+import org.csps.backend.domain.entities.StudentMembership;
+import org.csps.backend.domain.enums.MerchType;
 import org.csps.backend.domain.enums.OrderStatus;
 import org.csps.backend.repository.MerchVariantItemRepository;
 import org.csps.backend.repository.OrderItemRepository;
@@ -24,6 +26,7 @@ import org.csps.backend.repository.OrderRepository;
 import org.csps.backend.repository.StudentMembershipRepository;
 import org.csps.backend.repository.StudentRepository;
 import org.csps.backend.service.FinanceDashboardService;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
@@ -32,11 +35,21 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class FinanceDashboardServiceImpl implements FinanceDashboardService {
 
+    private static final BigDecimal MEMBERSHIP_REVENUE_PER_MEMBER = BigDecimal.valueOf(100);
+    private static final List<OrderStatus> FINANCE_REVENUE_STATUSES =
+            List.of(OrderStatus.TO_BE_CLAIMED, OrderStatus.CLAIMED);
+
     private final MerchVariantItemRepository merchVariantItemRepository;
     private final OrderItemRepository orderItemRepository;
     private final StudentMembershipRepository studentMembershipRepository;
     private final StudentRepository studentRepository;
     private final OrderRepository orderRepository;
+
+    @Value("${csps.currentAcademicYear.start}")
+    private int currentYearStart;
+
+    @Value("${csps.currentAcademicYear.end}")
+    private int currentYearEnd;
 
     @Override
     public FinanceDashboardDTO getFinanceDashboardData() {
@@ -67,8 +80,11 @@ public class FinanceDashboardServiceImpl implements FinanceDashboardService {
     }
 
     private List<OrderSummaryDTO> getRecentOrders() {
-        // Get recent orders with CLAIMED status (paid/approved), limit 5
-        return orderItemRepository.findTop5ByOrderStatusInOrderByCreatedAtDesc(List.of(OrderStatus.CLAIMED)).stream()
+        return orderItemRepository
+                .findTop5ByOrderStatusInAndMerchVariantItemMerchVariantMerchMerchTypeNotOrderByCreatedAtDesc(
+                        FINANCE_REVENUE_STATUSES,
+                        MerchType.MEMBERSHIP)
+                .stream()
                 .map(item -> {
                     OrderSummaryDTO dto = new OrderSummaryDTO();
                     dto.setOrderItemId(item.getOrderItemId());
@@ -78,7 +94,7 @@ public class FinanceDashboardServiceImpl implements FinanceDashboardService {
                     dto.setProductName(item.getMerchVariantItem().getMerchVariant().getMerch().getMerchName());
                     dto.setS3ImageKey(item.getMerchVariantItem().getMerchVariant().getS3ImageKey());
                     dto.setStatus(item.getOrderStatus().name());
-                    dto.setPrice(BigDecimal.valueOf(item.getPriceAtPurchase()));
+                    dto.setPrice(calculateLineTotal(item));
                     dto.setCreatedAt(item.getCreatedAt());
                     return dto;
                 })
@@ -127,25 +143,28 @@ public class FinanceDashboardServiceImpl implements FinanceDashboardService {
         LocalDateTime startDateTime = startDate.atStartOfDay();
         LocalDateTime endDateTime = endDate.atTime(23, 59, 59);
 
-        // Only include CLAIMED (paid/approved) orders
-        List<Order> orders = orderRepository.findByOrderDateBetweenAndOrderStatus(startDateTime, endDateTime, OrderStatus.CLAIMED);
-
-        // Group orders by date
-        Map<LocalDate, List<Order>> ordersByDate = orders.stream()
-                .collect(Collectors.groupingBy(order -> order.getOrderDate().toLocalDate()));
+        List<Order> orders = orderRepository.findByOrderDateBetweenAndOrderStatusIn(
+                startDateTime,
+                endDateTime,
+                FINANCE_REVENUE_STATUSES);
+        List<StudentMembership> currentYearMemberships =
+                studentMembershipRepository.findByYearStartAndYearEnd(currentYearStart, currentYearEnd);
 
         List<String> days = startDate.datesUntil(endDate.plusDays(1))
                 .map(date -> date.getDayOfWeek().getDisplayName(TextStyle.SHORT, Locale.ENGLISH))
                 .collect(Collectors.toList());
 
         List<Integer> weeklyOrders = startDate.datesUntil(endDate.plusDays(1))
-                .map(date -> ordersByDate.getOrDefault(date, Collections.emptyList()).size())
+                .map(date -> (int) orders.stream()
+                        .filter(order -> order.getOrderDate() != null)
+                        .filter(order -> order.getOrderDate().toLocalDate().equals(date))
+                        .count())
                 .collect(Collectors.toList());
 
         List<Double> weeklyRevenue = startDate.datesUntil(endDate.plusDays(1))
-                .map(date -> ordersByDate.getOrDefault(date, Collections.emptyList()).stream()
-                        .mapToDouble(Order::getTotalPrice)
-                        .sum())
+                .map(date -> calculateMerchRevenueForDate(orders, date)
+                        .add(calculateMembershipRevenueForDate(currentYearMemberships, date))
+                        .doubleValue())
                 .collect(Collectors.toList());
 
         ChartDataDTO dto = new ChartDataDTO();
@@ -160,5 +179,57 @@ public class FinanceDashboardServiceImpl implements FinanceDashboardService {
         if (stock == null || stock <= 0) return "OUT_OF_STOCK";
         if (stock <= 10) return "LOW_STOCK";
         return "IN_STOCK";
+    }
+
+    private BigDecimal calculateMerchRevenueForDate(List<Order> orders, LocalDate targetDate) {
+        return orders.stream()
+                .filter(order -> order.getOrderDate() != null)
+                .filter(order -> order.getOrderDate().toLocalDate().equals(targetDate))
+                .map(this::calculateFinanceMerchRevenue)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
+    private BigDecimal calculateMembershipRevenueForDate(List<StudentMembership> memberships, LocalDate targetDate) {
+        long membershipCount = memberships.stream()
+                .filter(membership -> membership.getDateJoined() != null)
+                .filter(membership -> membership.getDateJoined().toLocalDate().equals(targetDate))
+                .count();
+
+        return MEMBERSHIP_REVENUE_PER_MEMBER.multiply(BigDecimal.valueOf(membershipCount));
+    }
+
+    private BigDecimal calculateFinanceMerchRevenue(Order order) {
+        if (order == null || order.getOrderItems() == null || order.getOrderItems().isEmpty()) {
+            return BigDecimal.ZERO;
+        }
+
+        return order.getOrderItems().stream()
+                .filter(this::isFinanceRevenueItem)
+                .filter(item -> !isMembershipItem(item))
+                .map(this::calculateLineTotal)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
+    private boolean isFinanceRevenueItem(OrderItem item) {
+        return item != null
+                && item.getOrderStatus() != null
+                && FINANCE_REVENUE_STATUSES.contains(item.getOrderStatus());
+    }
+
+    private boolean isMembershipItem(OrderItem item) {
+        return item != null
+                && item.getMerchVariantItem() != null
+                && item.getMerchVariantItem().getMerchVariant() != null
+                && item.getMerchVariantItem().getMerchVariant().getMerch() != null
+                && item.getMerchVariantItem().getMerchVariant().getMerch().getMerchType() == MerchType.MEMBERSHIP;
+    }
+
+    private BigDecimal calculateLineTotal(OrderItem item) {
+        if (item == null || item.getPriceAtPurchase() == null || item.getQuantity() == null) {
+            return BigDecimal.ZERO;
+        }
+
+        return BigDecimal.valueOf(item.getPriceAtPurchase())
+                .multiply(BigDecimal.valueOf(item.getQuantity().longValue()));
     }
 }

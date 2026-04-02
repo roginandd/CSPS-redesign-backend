@@ -3,12 +3,15 @@ package org.csps.backend.controller;
 import java.io.IOException;
 import java.util.List;
 
+import org.csps.backend.annotation.Auditable;
 import org.csps.backend.domain.dtos.request.MerchRequestDTO;
 import org.csps.backend.domain.dtos.request.MerchUpdateRequestDTO;
 import org.csps.backend.domain.dtos.request.MerchVariantRequestDTO;
+import org.csps.backend.domain.dtos.request.TicketFreebieConfigRequestDTO;
 import org.csps.backend.domain.dtos.response.GlobalResponseBuilder;
 import org.csps.backend.domain.dtos.response.MerchDetailedResponseDTO;
 import org.csps.backend.domain.dtos.response.MerchSummaryResponseDTO;
+import org.csps.backend.domain.enums.AuditAction;
 import org.csps.backend.domain.enums.MerchType;
 import org.csps.backend.service.MerchService;
 import org.springframework.data.domain.Page;
@@ -35,19 +38,21 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+
 @RestController
 @RequestMapping("/api/merch")
 @RequiredArgsConstructor
 public class MerchController {
 
     private final MerchService merchService;
+    private final ObjectMapper objectMapper;
 
     /**
-     * Creates a complete merchandise entry including all variants and items.
-     * Accepts multipart/form-data for image uploads (main image + variant images).
+     * Creates a merch item and, for tickets, optionally stores zero or many inline freebie configs.
      */
     @PostMapping(value = "/post", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @PreAuthorize("hasRole('ADMIN')")
+    @Auditable(action = AuditAction.CREATE, resourceType = "Merch")
     public ResponseEntity<GlobalResponseBuilder<MerchDetailedResponseDTO>> createMerch(
             @RequestParam String merchName,
             @RequestParam String description,
@@ -56,26 +61,23 @@ public class MerchController {
             @RequestParam(required = false) String s3ImageKey,
             @RequestParam(required = true) MultipartFile merchImage,
             @RequestParam String variants,
-            @RequestParam(required = true) MultipartFile[] variantImages
+            @RequestParam(required = false) MultipartFile[] variantImages,
+            @RequestParam(required = false, defaultValue = "false") Boolean hasFreebie,
+            @RequestParam(required = false) String freebieConfigs
     ) throws IOException {
-        // Parse variants JSON to list
-        ObjectMapper mapper = new ObjectMapper();
-        List<MerchVariantRequestDTO> variantsList = mapper.readValue(
-            variants, 
+        List<MerchVariantRequestDTO> variantsList = objectMapper.readValue(
+            variants,
             new TypeReference<List<MerchVariantRequestDTO>>() {}
         );
-        
 
-
-        // Assign variant images to each variant
         if (variantImages != null) {
             for (int i = 0; i < variantsList.size() && i < variantImages.length; i++) {
                 variantsList.get(i).setVariantImage(variantImages[i]);
             }
         }
-      
 
-        // Build MerchRequestDTO
+        List<TicketFreebieConfigRequestDTO> parsedFreebieConfigs = parseFreebieConfigs(freebieConfigs);
+
         MerchRequestDTO request = MerchRequestDTO.builder()
                 .merchName(merchName)
                 .description(description)
@@ -83,14 +85,13 @@ public class MerchController {
                 .basePrice(basePrice)
                 .s3ImageKey(s3ImageKey)
                 .merchImage(merchImage)
+                .hasFreebie(hasFreebie)
+                .freebieConfigs(parsedFreebieConfigs)
                 .merchVariantRequestDto(variantsList)
                 .build();
 
-
-
         MerchDetailedResponseDTO createdMerch = merchService.createMerch(request);
-        String message = "Merchandise created successfully with all variants and items";
-        return GlobalResponseBuilder.buildResponse(message, createdMerch, HttpStatus.CREATED);
+        return GlobalResponseBuilder.buildResponse("Merchandise created successfully", createdMerch, HttpStatus.CREATED);
     }
 
     @GetMapping
@@ -119,28 +120,26 @@ public class MerchController {
 
     @PutMapping("/{merchId}")
     @PreAuthorize("hasRole('ADMIN')")
+    @Auditable(action = AuditAction.UPDATE, resourceType = "Merch")
     public ResponseEntity<GlobalResponseBuilder<MerchDetailedResponseDTO>> putMerch(
-            @PathVariable Long merchId, 
+            @PathVariable Long merchId,
             @Valid @RequestBody MerchUpdateRequestDTO request
     ) throws IOException {
         MerchDetailedResponseDTO response = merchService.putMerch(merchId, request);
-        return GlobalResponseBuilder.buildResponse("Merch Updated Successfully", response, HttpStatus.OK);
+        return GlobalResponseBuilder.buildResponse("Merch updated successfully", response, HttpStatus.OK);
     }
 
     @PatchMapping("/{merchId}")
     @PreAuthorize("hasRole('ADMIN')")
+    @Auditable(action = AuditAction.UPDATE, resourceType = "Merch")
     public ResponseEntity<GlobalResponseBuilder<MerchDetailedResponseDTO>> patchMerch(
-            @PathVariable Long merchId, 
+            @PathVariable Long merchId,
             @RequestBody MerchUpdateRequestDTO request
     ) throws IOException {
         MerchDetailedResponseDTO response = merchService.patchMerch(merchId, request);
-        return GlobalResponseBuilder.buildResponse("Merch Updated Successfully", response, HttpStatus.OK);
+        return GlobalResponseBuilder.buildResponse("Merch updated successfully", response, HttpStatus.OK);
     }
 
-    /**
-     * Deletes a merchandise entry and all its associated variants and items.
-     * Also deletes associated S3 images.
-     */
     @DeleteMapping("/{merchId}")
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<GlobalResponseBuilder<Void>> deleteMerch(@PathVariable Long merchId) {
@@ -148,10 +147,6 @@ public class MerchController {
         return GlobalResponseBuilder.buildResponse("Merch archived successfully", null, HttpStatus.NO_CONTENT);
     }
 
-    /**
-     * Get archived merchandise with pagination and eager loading.
-     * Only fetches the size of the page requested.
-     */
     @GetMapping("/archive")
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<GlobalResponseBuilder<Page<MerchDetailedResponseDTO>>> getArchivedMerch(
@@ -161,10 +156,6 @@ public class MerchController {
         return GlobalResponseBuilder.buildResponse("Retrieved archived merchandise", archived, HttpStatus.OK);
     }
 
-    /**
-     * Revert archived merchandise back to active status.
-     * Makes archived merchandise visible and available for purchase again.
-     */
     @PutMapping("/{merchId}/revert")
     @PreAuthorize("hasRole('ADMIN_EXECUTIVE') or hasRole('ADMIN_FINANCE')")
     public ResponseEntity<GlobalResponseBuilder<MerchDetailedResponseDTO>> revertMerch(@PathVariable Long merchId) {
@@ -172,4 +163,10 @@ public class MerchController {
         return GlobalResponseBuilder.buildResponse("Merchandise reverted to active status", reverted, HttpStatus.OK);
     }
 
+    private List<TicketFreebieConfigRequestDTO> parseFreebieConfigs(String freebieConfigs) throws IOException {
+        if (freebieConfigs == null || freebieConfigs.trim().isEmpty()) {
+            return List.of();
+        }
+        return objectMapper.readValue(freebieConfigs, new TypeReference<List<TicketFreebieConfigRequestDTO>>() {});
+    }
 }

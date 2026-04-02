@@ -3,6 +3,8 @@ package org.csps.backend.controller;
 import java.util.List;
 
 import org.csps.backend.domain.dtos.request.CartItemRequestDTO;
+import org.csps.backend.domain.dtos.request.TicketFreebieSelectionRequestDTO;
+import org.csps.backend.domain.dtos.response.CartItemFreebieSelectionResponseDTO;
 import org.csps.backend.domain.dtos.response.CartItemResponseDTO;
 import org.csps.backend.domain.dtos.response.GlobalResponseBuilder;
 import org.csps.backend.service.CartItemService;
@@ -30,9 +32,6 @@ public class CartItemController {
 
     private final CartItemService cartItemService;
 
-    /**
-     * Add item to cart.
-     */
     @PostMapping
     @PreAuthorize("hasRole('STUDENT')")
     public ResponseEntity<GlobalResponseBuilder<CartItemResponseDTO>> addCartItem(
@@ -42,9 +41,6 @@ public class CartItemController {
         return GlobalResponseBuilder.buildResponse("Cart item added successfully", responseDTO, HttpStatus.CREATED);
     }
 
-    /**
-     * Get all items in cart.
-     */
     @GetMapping
     @PreAuthorize("hasRole('STUDENT')")
     public ResponseEntity<GlobalResponseBuilder<List<CartItemResponseDTO>>> getCartItems(
@@ -53,9 +49,6 @@ public class CartItemController {
         return GlobalResponseBuilder.buildResponse("Cart items retrieved successfully", responseDTOs, HttpStatus.OK);
     }
 
-    /**
-     * Edit a cart item by updating its quantity.
-     */
     @PutMapping("/{merchVariantItemId}")
     @PreAuthorize("hasRole('STUDENT')")
     public ResponseEntity<GlobalResponseBuilder<CartItemResponseDTO>> updateCartItemQuantity(
@@ -66,9 +59,30 @@ public class CartItemController {
         return GlobalResponseBuilder.buildResponse("Cart item updated successfully", responseDTO, HttpStatus.OK);
     }
 
-    /**
-     * Remove item from cart.
-     */
+    @GetMapping("/{merchVariantItemId}/freebie-selection")
+    @PreAuthorize("hasRole('STUDENT')")
+    public ResponseEntity<GlobalResponseBuilder<CartItemFreebieSelectionResponseDTO>> getCartItemFreebieSelection(
+            @AuthenticationPrincipal String studentId,
+            @PathVariable Long merchVariantItemId) {
+        CartItemFreebieSelectionResponseDTO responseDTO = cartItemService.getCartItemFreebieSelection(
+                studentId,
+                merchVariantItemId);
+        return GlobalResponseBuilder.buildResponse("Cart freebie selection retrieved successfully", responseDTO, HttpStatus.OK);
+    }
+
+    @PutMapping("/{merchVariantItemId}/freebie-selection")
+    @PreAuthorize("hasRole('STUDENT')")
+    public ResponseEntity<GlobalResponseBuilder<CartItemResponseDTO>> updateCartItemFreebieSelection(
+            @AuthenticationPrincipal String studentId,
+            @PathVariable Long merchVariantItemId,
+            @Valid @RequestBody List<TicketFreebieSelectionRequestDTO> requestDTO) {
+        CartItemResponseDTO responseDTO = cartItemService.updateCartItemFreebieSelection(
+                studentId,
+                merchVariantItemId,
+                requestDTO);
+        return GlobalResponseBuilder.buildResponse("Cart freebie selection updated successfully", responseDTO, HttpStatus.OK);
+    }
+
     @DeleteMapping("/{merchVariantItemId}")
     @PreAuthorize("hasRole('STUDENT')")
     public ResponseEntity<GlobalResponseBuilder<Void>> removeCartItem(

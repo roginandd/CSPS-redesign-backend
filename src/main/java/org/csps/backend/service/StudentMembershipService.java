@@ -15,6 +15,7 @@ import org.springframework.data.domain.Pageable;
 
 public interface StudentMembershipService {
     StudentMembershipResponseDTO createStudentMembership(StudentMembershipRequestDTO requestDTO);
+    StudentMembershipResponseDTO ensureMembershipForCurrentAcademicYear(String studentId);
     List<StudentMembershipResponseDTO> getAllStudentMemberships();
     List<StudentMembershipResponseDTO> getStudentWithMemberships(String studentId);
     Optional<StudentMembershipResponseDTO> getStudentMembershipById(Long membershipId);

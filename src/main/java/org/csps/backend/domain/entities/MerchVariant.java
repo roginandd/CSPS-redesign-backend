@@ -64,5 +64,5 @@ public class MerchVariant {
 
     @Column(nullable = false)
     private String s3ImageKey;  // S3 object key - REQUIRED, every variant must have an image
-    
+
 }

@@ -45,13 +45,14 @@ public interface MerchRepository extends JpaRepository<Merch, Long>{
             m.merchType, 
             m.basePrice, 
             m.s3ImageKey, 
-            CAST(SUM(i.stockQuantity) AS int)
+            CAST(COALESCE(SUM(i.stockQuantity), 0) AS int),
+            m.hasFreebie
         )
         FROM Merch m
         LEFT JOIN m.merchVariantList v
         LEFT JOIN v.merchVariantItems i
         WHERE m.isActive = true
-        GROUP BY m.merchId
+        GROUP BY m.merchId, m.merchName, m.description, m.merchType, m.basePrice, m.s3ImageKey, m.hasFreebie
     """)
     List<MerchSummaryResponseDTO> findAllSummaries();
 
@@ -63,13 +64,14 @@ public interface MerchRepository extends JpaRepository<Merch, Long>{
             m.merchType, 
             m.basePrice, 
             m.s3ImageKey, 
-            CAST(COALESCE(SUM(i.stockQuantity), 0) AS int)
+            CAST(COALESCE(SUM(i.stockQuantity), 0) AS int),
+            m.hasFreebie
         )
         FROM Merch m
         LEFT JOIN m.merchVariantList v
         LEFT JOIN v.merchVariantItems i
         WHERE m.merchType = :type AND m.isActive = true
-        GROUP BY m.merchId, m.merchName, m.description, m.merchType, m.basePrice, m.s3ImageKey
+        GROUP BY m.merchId, m.merchName, m.description, m.merchType, m.basePrice, m.s3ImageKey, m.hasFreebie
     """)
     List<MerchSummaryResponseDTO> findAllSummaryByType(@Param("type") MerchType type);
 }
