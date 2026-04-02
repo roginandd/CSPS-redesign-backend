@@ -19,11 +19,17 @@ public interface CartItemMapper {
     @Mapping(source = "quantity", target = "quantity")
     @Mapping(source = "merchVariantItem.merchVariant.merch.merchType", target = "merchType")
     @Mapping(target = "subTotal", expression = "java(cartItem.getQuantity() * (cartItem.getMerchVariantItem() != null ? cartItem.getMerchVariantItem().getPrice() : 0.0))")
+    @Mapping(target = "hasFreebie", ignore = true)
+    @Mapping(target = "freebieSelections", ignore = true)
     CartItemResponseDTO toResponseDTO(CartItem cartItem);
 
-    @Mapping(target = "id", ignore = true)
+    @Mapping(target = "cartItemId", ignore = true)
     @Mapping(target = "cart", ignore = true)
     @Mapping(target = "merchVariantItem", ignore = true)
+    @Mapping(target = "selectedFreebieSize", ignore = true)
+    @Mapping(target = "selectedFreebieColor", ignore = true)
+    @Mapping(target = "selectedFreebieDesign", ignore = true)
+    @Mapping(target = "freebieSelections", ignore = true)
     @Mapping(source = "quantity", target = "quantity")
     CartItem toEntity(CartItemRequestDTO cartItemRequestDTO);
 }

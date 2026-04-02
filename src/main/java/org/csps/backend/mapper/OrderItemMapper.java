@@ -20,6 +20,7 @@ public interface OrderItemMapper {
     @Mapping(source = "merchVariantItem.merchVariant.s3ImageKey", target = "s3ImageKey")
     @Mapping(source = "quantity", target = "quantity")
     @Mapping(target = "totalPrice", expression = "java(orderItem.getQuantity() * orderItem.getPriceAtPurchase())")
+    @Mapping(target = "freebieAssignments", ignore = true)
     @Mapping(source = "createdAt", target = "createdAt")
     @Mapping(source = "updatedAt", target = "updatedAt")
     @Mapping(source="orderStatus", target="orderStatus")
