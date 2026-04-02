@@ -1,7 +1,7 @@
 package org.csps.backend.controller;
 
+import org.csps.backend.domain.dtos.request.StudentProfileCompletionRequestDTO;
 import org.csps.backend.domain.dtos.request.StudentRequestDTO;
-import org.csps.backend.domain.dtos.request.UserRequestDTO;
 import org.csps.backend.domain.dtos.response.GlobalResponseBuilder;
 import org.csps.backend.domain.dtos.response.StudentResponseDTO;
 import org.csps.backend.service.StudentService;
@@ -83,9 +83,9 @@ public class StudentController {
    @PreAuthorize("hasRole('STUDENT')")
    public ResponseEntity<GlobalResponseBuilder<StudentResponseDTO>> completeProfile(
            @PathVariable String studentId,
-           @Valid @RequestBody UserRequestDTO userRequestDTO) {
+           @Valid @RequestBody StudentProfileCompletionRequestDTO profileRequestDTO) {
        
-       StudentResponseDTO updated = studentService.completeStudentProfile(studentId, userRequestDTO);
+       StudentResponseDTO updated = studentService.completeStudentProfile(studentId, profileRequestDTO);
        String message = "Profile completed successfully";
        return GlobalResponseBuilder.buildResponse(message, updated, HttpStatus.OK);
    }

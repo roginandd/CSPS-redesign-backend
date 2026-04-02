@@ -2,8 +2,8 @@ package org.csps.backend.service.impl;
 
 import java.util.Optional;
 
+import org.csps.backend.domain.dtos.request.StudentProfileCompletionRequestDTO;
 import org.csps.backend.domain.dtos.request.StudentRequestDTO;
-import org.csps.backend.domain.dtos.request.UserRequestDTO;
 import org.csps.backend.domain.dtos.response.StudentResponseDTO;
 import org.csps.backend.domain.entities.Admin;
 import org.csps.backend.domain.entities.Student;
@@ -142,7 +142,7 @@ public class StudentServiceImpl implements StudentService {
    
    @Override
    @Transactional
-   public StudentResponseDTO completeStudentProfile(String studentId, UserRequestDTO userRequestDTO) {
+   public StudentResponseDTO completeStudentProfile(String studentId, StudentProfileCompletionRequestDTO profileRequestDTO) {
        /* find student and validate existence */
        Student student = studentRepository.findById(studentId)
                .orElseThrow(() -> new StudentNotFoundException("Student not found: " + studentId));
@@ -151,9 +151,9 @@ public class StudentServiceImpl implements StudentService {
        UserProfile profile = student.getUserAccount().getUserProfile();
        
        /* update profile with complete information */
-       profile.setMiddleName(userRequestDTO.getMiddleName());
-       profile.setBirthDate(userRequestDTO.getBirthDate());
-       profile.setEmail(userRequestDTO.getEmail());
+    profile.setMiddleName(profileRequestDTO.getMiddleName());
+    profile.setBirthDate(profileRequestDTO.getBirthDate());
+    profile.setEmail(profileRequestDTO.getEmail());
        profile.setIsProfileComplete(true);  // mark as complete
        
        userProfileRepository.save(profile);
