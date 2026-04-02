@@ -24,14 +24,13 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 @NoArgsConstructor
 public class MerchRequestDTO {
-    
     @NotBlank(message = "Merchandise name is required")
     @Size(max = 100, message = "Merchandise name must not exceed 100 characters")
     private String merchName;
-    
+
     @Size(max = 500, message = "Description must not exceed 500 characters")
     private String description;
-    
+
     @NotNull(message = "Merchandise type is required")
     private MerchType merchType;
 
@@ -39,13 +38,20 @@ public class MerchRequestDTO {
     @Positive
     private Double basePrice;
 
-    private String s3ImageKey; // Placeholder key; actual image will be uploaded separately
+    private String s3ImageKey;
 
     @JsonIgnore
-    private MultipartFile merchImage; // Image file for the merch
+    private MultipartFile merchImage;
 
-    
+    @Builder.Default
+    private Boolean hasFreebie = false;
+
+    @Valid
+    @Builder.Default
+    private List<TicketFreebieConfigRequestDTO> freebieConfigs = new ArrayList<>();
+
     @JsonProperty("variants")
     @Valid
+    @Builder.Default
     private List<MerchVariantRequestDTO> merchVariantRequestDto = new ArrayList<>();
 }
